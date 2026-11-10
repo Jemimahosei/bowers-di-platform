@@ -1,0 +1,1 @@
+{"dependencies":{"next":"^15","react":"^19","react-dom":"^19"},"devDependencies":{"@types/node":"^20","@types/react":"^19","@types/react-dom":"^19","typescript":"^5"},"name":"bowers-di-platform-frontend","private":true,"scripts":{"build":"next build","dev":"next dev","start":"next start"},"version":"0.1.0"}
