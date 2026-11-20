@@ -5,7 +5,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Belonging at Bowers — Center for Belonging, Cornell Bowers CIS",
   description:
-    "The Center for Belonging's tool to reach underrepresented students and get them using the Center's resources: resources, conferences, programs, newsletter, and appointments.",
+    "The Center for Belonging's newsletter — the Center's resources, delivered to your Cornell inbox — plus audiences from student organizations, real appointment booking with Dr. Roberts, resources, conferences, and programs.",
 };
 
 export default function RootLayout({

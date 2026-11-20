@@ -70,6 +70,10 @@ export default function NewsletterPage() {
     e.preventDefault();
     setError("");
     setSignupResult(null);
+    if (!form.email.trim().toLowerCase().endsWith("@cornell.edu")) {
+      setError("Use your Cornell email to subscribe.");
+      return;
+    }
     try {
       const res = await api.newsletterSignup({
         name: form.name,
@@ -84,8 +88,22 @@ export default function NewsletterPage() {
         url: res.confirmation_url,
         email: form.email,
       });
-    } catch {
-      setError("Could not sign up. Check the API and try again.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      // The API error body carries the detail, e.g.
+      // {"detail":"Use your Cornell email to subscribe."}
+      let detail = "";
+      try {
+        detail = JSON.parse(msg.slice(msg.indexOf("{"))).detail ?? "";
+      } catch {
+        detail = "";
+      }
+      setError(
+        detail ||
+          (msg.includes("Cornell")
+            ? "Use your Cornell email to subscribe."
+            : "Could not sign up. Check the API and try again.")
+      );
     }
   }
 
@@ -114,15 +132,34 @@ export default function NewsletterPage() {
 
   return (
     <div className="container">
-      <h1>Newsletter</h1>
+      <h1>The Center&apos;s newsletter</h1>
       <p className="lede">
-        Get Center for Belonging news, conference updates, and opportunities
-        in your inbox.
+        This is how the Center&apos;s resources reach students — each
+        issue is sent to your Cornell inbox. The newsletter is the
+        Center&apos;s core way of reaching the students who need it.
       </p>
+      <h2>What subscribers get</h2>
+      <ul>
+        <li>
+          <strong>Resources, featured in every issue</strong> — the
+          Center&apos;s real office services, community resources, and
+          campus partners, picked for that issue.
+        </li>
+        <li>
+          <strong>Conference funding and deadlines</strong> — Grace
+          Hopper, Tapia, Code Afrique, and what you need to apply.
+        </li>
+        <li>
+          <strong>Events and programs</strong> — what the Center is
+          running and how to take part.
+        </li>
+      </ul>
       <p className="notice">
-        Signup is opt-in only. The Center never takes member lists from
-        student organizations — you sign up yourself, and you confirm your
-        own subscription.
+        Signup is opt-in only and Cornell-only — use your @cornell.edu
+        email. The Center also reaches students through audiences built
+        with student organizations&apos; agreement (see{" "}
+        <a href="/audiences">Audiences</a>). Either way, anyone can opt
+        out and is never emailed again.
       </p>
       {confirmState && <p className="success">{confirmState}</p>}
       {error && <p className="error">{error}</p>}
@@ -176,6 +213,7 @@ export default function NewsletterPage() {
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
                 placeholder="netid@cornell.edu"
               />
+              <span>Cornell email only — use your @cornell.edu address.</span>
             </label>
             <label>
               Interests

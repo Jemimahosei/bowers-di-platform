@@ -5,9 +5,10 @@ import { useCallback, useEffect, useState } from "react";
 import {
   api,
   getToken,
-  type Appointment,
+  type Booking,
   type DashboardData,
   type OutreachEntry,
+  type Slot,
   type User,
 } from "../../lib/api";
 import { BarChart, LineChart } from "../../components/Charts";
@@ -43,7 +44,8 @@ export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [data, setData] = useState<DashboardData | null>(null);
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [slots, setSlots] = useState<Slot[]>([]);
   const [outreach, setOutreach] = useState<OutreachEntry[]>([]);
   const [summary, setSummary] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState("");
@@ -53,19 +55,27 @@ export default function DashboardPage() {
     contacts_reached: "",
     notes: "",
   });
+  const [slotForm, setSlotForm] = useState({
+    date: new Date().toISOString().slice(0, 10),
+    start_time: "14:00",
+    end_time: "14:30",
+    type: "call",
+  });
 
   const refresh = useCallback(() => {
     Promise.all([
       api.dashboard(),
-      api.appointments(),
+      api.bookings(),
+      api.slots(false),
       api.outreachList(),
       api.reportsSummary(),
     ])
-      .then(([d, a, o, s]) => {
+      .then(([d, b, s, o, sum]) => {
         setData(d);
-        setAppointments(a);
+        setBookings(b);
+        setSlots(s);
         setOutreach(o);
-        setSummary(s);
+        setSummary(sum);
       })
       .catch(() =>
         setError("Could not reach the API. Is the backend running?")
@@ -87,12 +97,38 @@ export default function DashboardPage() {
       .catch(() => setAuthChecked(true));
   }, [refresh]);
 
-  async function setAppointmentStatus(id: number, status: string) {
+  async function cancelBooking(id: number) {
     try {
-      await api.updateAppointment(id, status);
+      await api.cancelBooking(id);
       refresh();
     } catch {
-      setError("Could not update that appointment.");
+      setError("Could not cancel that booking.");
+    }
+  }
+
+  async function addSlot(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    try {
+      await api.createSlot(slotForm);
+      setSlotForm({
+        date: new Date().toISOString().slice(0, 10),
+        start_time: "14:00",
+        end_time: "14:30",
+        type: "call",
+      });
+      refresh();
+    } catch {
+      setError("Could not add that slot. Check the times and try again.");
+    }
+  }
+
+  async function deleteSlot(id: number) {
+    try {
+      await api.deleteSlot(id);
+      refresh();
+    } catch {
+      setError("Could not delete that slot — cancel its booking first.");
     }
   }
 
@@ -153,9 +189,15 @@ export default function DashboardPage() {
 
       <h2>Overview</h2>
       <div className="stats">
+        <div className="stat"><strong>{t?.audiences ?? "—"}</strong><span>Audiences</span></div>
+        <div className="stat"><strong>{t?.contacts ?? "—"}</strong><span>Contacts to reach</span></div>
+        <div className="stat"><strong>{t?.opted_out_contacts ?? "—"}</strong><span>Opted out</span></div>
+        <div className="stat"><strong>{t?.campaigns ?? "—"}</strong><span>Newsletter issues</span></div>
+        <div className="stat"><strong>{t?.campaigns_sent ?? "—"}</strong><span>Issues sent</span></div>
+        <div className="stat"><strong>{t?.open_slots ?? "—"}</strong><span>Open appointment slots</span></div>
+        <div className="stat"><strong>{t?.upcoming_bookings ?? "—"}</strong><span>Upcoming bookings</span></div>
         <div className="stat"><strong>{t?.subscribers ?? "—"}</strong><span>Newsletter subscribers</span></div>
         <div className="stat"><strong>{t?.confirmed_subscribers ?? "—"}</strong><span>Confirmed subscribers</span></div>
-        <div className="stat"><strong>{t?.appointments_pending ?? "—"}</strong><span>Appointments pending</span></div>
         <div className="stat"><strong>{t?.resources ?? "—"}</strong><span>Resources</span></div>
         <div className="stat"><strong>{t?.conferences ?? "—"}</strong><span>Conferences</span></div>
         <div className="stat"><strong>{t?.events ?? "—"}</strong><span>Events</span></div>
@@ -197,57 +239,165 @@ export default function DashboardPage() {
       )}
 
       {data && (
-        <div className="card" style={{ marginTop: "1rem" }}>
-          <h3>Appointments by status</h3>
-          <p>
-            Pending: {data.appointments_by_status.pending} · Confirmed:{" "}
-            {data.appointments_by_status.confirmed} · Declined:{" "}
-            {data.appointments_by_status.declined} · Completed:{" "}
-            {data.appointments_by_status.completed}
-          </p>
+        <div className="grid">
+          <div className="card">
+            <h3>Appointments — slots</h3>
+            <p>
+              Open: {data.slots_by_status.open} · Booked:{" "}
+              {data.slots_by_status.booked}
+            </p>
+            <p>
+              <Link href="/appointments">Public booking page →</Link>
+            </p>
+          </div>
+          <div className="card">
+            <h3>Appointments — bookings</h3>
+            <p>
+              Booked: {data.bookings_by_status.booked} · Cancelled:{" "}
+              {data.bookings_by_status.cancelled}
+            </p>
+          </div>
+          <div className="card">
+            <h3>Newsletter issues</h3>
+            <p>
+              Draft: {data.campaigns_by_status.draft} · Ready to send:{" "}
+              {data.campaigns_by_status.queued} · Sent:{" "}
+              {data.campaigns_by_status.sent} · Partially sent:{" "}
+              {data.campaigns_by_status.partially_sent}
+            </p>
+            <p>
+              <Link href="/campaigns">Compose an issue →</Link>
+            </p>
+          </div>
+          <div className="card">
+            <h3>Audiences</h3>
+            <p>
+              {data.totals.audiences} audiences · {data.totals.contacts}{" "}
+              contacts · {data.totals.opted_out_contacts} opted out
+            </p>
+            <p>
+              <Link href="/audiences">Manage audiences →</Link>
+            </p>
+          </div>
         </div>
       )}
 
-      <h2>Appointments</h2>
-      {appointments.length === 0 ? (
-        <p>No appointment requests yet.</p>
+      <h2>Availability slots (Dr. Roberts)</h2>
+      <form className="form" onSubmit={addSlot}>
+        <h3 style={{ margin: 0 }}>Add an availability slot</h3>
+        <label>
+          Date
+          <input
+            type="date"
+            required
+            value={slotForm.date}
+            onChange={(e) => setSlotForm({ ...slotForm, date: e.target.value })}
+          />
+        </label>
+        <label>
+          Start time
+          <input
+            type="time"
+            required
+            value={slotForm.start_time}
+            onChange={(e) =>
+              setSlotForm({ ...slotForm, start_time: e.target.value })
+            }
+          />
+        </label>
+        <label>
+          End time
+          <input
+            type="time"
+            required
+            value={slotForm.end_time}
+            onChange={(e) =>
+              setSlotForm({ ...slotForm, end_time: e.target.value })
+            }
+          />
+        </label>
+        <label>
+          Type
+          <select
+            value={slotForm.type}
+            onChange={(e) => setSlotForm({ ...slotForm, type: e.target.value })}
+          >
+            <option value="call">Call</option>
+            <option value="in-person">In person</option>
+          </select>
+        </label>
+        <button type="submit">Add slot</button>
+      </form>
+      {slots.length === 0 ? (
+        <p>No slots yet. Add Dr. Roberts&apos; availability above — the booking page lists only open slots.</p>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Time</th>
+              <th>Type</th>
+              <th>Host</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {slots.map((s) => (
+              <tr key={s.id}>
+                <td>{s.date}</td>
+                <td>
+                  {s.start_time}–{s.end_time}
+                </td>
+                <td>{s.type}</td>
+                <td>{s.host}</td>
+                <td>{s.status}</td>
+                <td>
+                  {s.status === "open" && (
+                    <button className="secondary" onClick={() => deleteSlot(s.id)}>
+                      Delete
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <h2>Bookings</h2>
+      {bookings.length === 0 ? (
+        <p>No bookings yet.</p>
       ) : (
         <table>
           <thead>
             <tr>
               <th>Name</th>
               <th>Email</th>
-              <th>Topic</th>
-              <th>Preferred</th>
+              <th>Purpose</th>
+              <th>When</th>
               <th>Status</th>
-              <th>Actions</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
-            {appointments.map((a) => (
-              <tr key={a.id}>
-                <td>{a.name}</td>
-                <td>{a.email}</td>
-                <td>{a.topic}</td>
+            {bookings.map((b) => (
+              <tr key={b.id}>
+                <td>{b.name}</td>
+                <td>{b.email}</td>
+                <td>{b.purpose}</td>
                 <td>
-                  {a.preferred_date ?? "—"}
-                  {a.preferred_time ? ` ${a.preferred_time}` : ""}
+                  {b.slot
+                    ? `${b.slot.date}, ${b.slot.start_time}–${b.slot.end_time} (${b.slot.type})`
+                    : "—"}
                 </td>
-                <td>{a.status}</td>
+                <td>{b.status}</td>
                 <td>
-                  <button
-                    onClick={() => setAppointmentStatus(a.id, "confirmed")}
-                    disabled={a.status === "confirmed"}
-                  >
-                    Confirm
-                  </button>{" "}
-                  <button
-                    className="secondary"
-                    onClick={() => setAppointmentStatus(a.id, "declined")}
-                    disabled={a.status === "declined"}
-                  >
-                    Decline
-                  </button>
+                  {b.status === "booked" && (
+                    <button className="secondary" onClick={() => cancelBooking(b.id)}>
+                      Cancel (re-opens slot)
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

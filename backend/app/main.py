@@ -17,21 +17,32 @@ it is served statically with an SPA fallback to index.html for
 non-/api paths.
 """
 
+import csv
+import io
 import json
 import os
 import secrets
 from collections import Counter, defaultdict
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import auth, models, schemas, seed
+from . import auth, mail, models, schemas, seed
 from .database import Base, SessionLocal, engine, get_db
 
 Base.metadata.create_all(bind=engine)
@@ -323,6 +334,9 @@ def create_event(
 
 
 # ------------------------------ Newsletter -------------------------------
+# The newsletter is the CORE feature: it is how the Center's resources
+# reach students at the Cornell domain. Public signup accepts Cornell
+# addresses ONLY (@cornell.edu, validated here and on the frontend).
 # Double opt-in. NOTE: there is no mail server wired up here, so the
 # confirmation link is returned in the signup response and shown on the
 # signup confirmation page. Wiring SendGrid / an SMTP service would let
@@ -363,6 +377,8 @@ def newsletter_signup(
     email = payload.email.strip().lower()
     if not email or "@" not in email:
         raise HTTPException(status_code=400, detail="A valid email is required")
+    if not mail.is_cornell_email(email):
+        raise HTTPException(status_code=400, detail=mail.CORNELL_EMAIL_ERROR)
     row = (
         db.query(models.NewsletterSubscriber)
         .filter(models.NewsletterSubscriber.email == email)
@@ -458,66 +474,167 @@ def list_subscribers(
     return [_subscriber_out(r) for r in rows]
 
 
-# ----------------------------- Appointments ------------------------------
+# ------------------------- Slots & bookings ------------------------------
+# Real appointment booking with Dr. LeeAnn Roberts (replaces the old
+# request-form inbox). Slots start EMPTY — staff add Dr. Roberts'
+# availability; a visitor books an open slot and it becomes BOOKED.
+# Cancelling a booking re-opens the slot. Contact
+# deib-office@bowers.cornell.edu stays visible in the UI.
 
 
-@app.post("/api/appointments", status_code=201)
-def create_appointment(
-    payload: schemas.AppointmentCreate, db: Session = Depends(get_db)
-):
-    row = models.Appointment(
-        name=payload.name.strip(),
-        email=payload.email.strip().lower(),
-        topic=payload.topic,
-        preferred_date=payload.preferred_date,
-        preferred_time=payload.preferred_time,
-        notes=payload.notes,
-        status="pending",
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
+def _slot_out(row: models.AvailabilitySlot) -> dict:
     return {
         "id": row.id,
-        "name": row.name,
-        "email": row.email,
-        "topic": row.topic,
-        "preferred_date": row.preferred_date.isoformat()
-        if row.preferred_date
-        else None,
-        "preferred_time": row.preferred_time,
-        "notes": row.notes,
+        "date": row.date.isoformat() if row.date else None,
+        "start_time": row.start_time,
+        "end_time": row.end_time,
+        "type": row.type,
+        "host": row.host,
         "status": row.status,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }
 
 
-@app.get("/api/appointments", response_model=list[schemas.AppointmentOut])
-def list_appointments(
+def _booking_out(row: models.Booking, db: Session) -> dict:
+    slot = db.get(models.AvailabilitySlot, row.slot_id)
+    return {
+        "id": row.id,
+        "slot_id": row.slot_id,
+        "name": row.name,
+        "email": row.email,
+        "purpose": row.purpose,
+        "status": row.status,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "cancelled_at": row.cancelled_at.isoformat()
+        if row.cancelled_at
+        else None,
+        "slot": _slot_out(slot) if slot is not None else None,
+    }
+
+
+@app.get("/api/slots")
+def list_slots(
+    open_only: bool = Query(default=True), db: Session = Depends(get_db)
+):
+    query = db.query(models.AvailabilitySlot)
+    if open_only:
+        query = query.filter(models.AvailabilitySlot.status == "open")
+    return [
+        _slot_out(s)
+        for s in query.order_by(
+            models.AvailabilitySlot.date, models.AvailabilitySlot.start_time
+        ).all()
+    ]
+
+
+@app.post("/api/slots", status_code=201)
+def create_slot(
+    payload: schemas.SlotCreate,
     admin: models.User = Depends(auth.require_admin),
     db: Session = Depends(get_db),
 ):
-    return (
-        db.query(models.Appointment)
-        .order_by(models.Appointment.created_at.desc())
-        .all()
+    if payload.end_time <= payload.start_time:
+        raise HTTPException(
+            status_code=400, detail="End time must be after start time"
+        )
+    row = models.AvailabilitySlot(
+        date=payload.date,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+        type=payload.type,
+        host=payload.host,
+        status="open",
+        created_by=admin.id,
     )
-
-
-@app.patch("/api/appointments/{appointment_id}")
-def update_appointment(
-    appointment_id: int,
-    payload: schemas.AppointmentStatusUpdate,
-    admin: models.User = Depends(auth.require_admin),
-    db: Session = Depends(get_db),
-):
-    row = db.get(models.Appointment, appointment_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Appointment not found")
-    row.status = payload.status
+    db.add(row)
     db.commit()
     db.refresh(row)
-    return row
+    return _slot_out(row)
+
+
+@app.delete("/api/slots/{slot_id}")
+def delete_slot(
+    slot_id: int,
+    admin: models.User = Depends(auth.require_admin),
+    db: Session = Depends(get_db),
+):
+    row = db.get(models.AvailabilitySlot, slot_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Slot not found")
+    if row.status != "open":
+        raise HTTPException(
+            status_code=409,
+            detail="Booked slots cannot be deleted — cancel the booking first",
+        )
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/slots/{slot_id}/book", status_code=201)
+def book_slot(
+    slot_id: int, payload: schemas.BookingCreate, db: Session = Depends(get_db)
+):
+    slot = db.get(models.AvailabilitySlot, slot_id)
+    if slot is None:
+        raise HTTPException(status_code=404, detail="Slot not found")
+    if slot.status != "open":
+        raise HTTPException(
+            status_code=409, detail="That slot is no longer available"
+        )
+    if not payload.name.strip():
+        raise HTTPException(status_code=400, detail="Name is required")
+    email = payload.email.strip().lower()
+    if "@" not in email or not email.endswith("@cornell.edu"):
+        raise HTTPException(
+            status_code=400, detail="A Cornell email address is required"
+        )
+    row = models.Booking(
+        slot_id=slot.id,
+        name=payload.name.strip(),
+        email=email,
+        purpose=payload.purpose.strip(),
+        status="booked",
+    )
+    slot.status = "booked"
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _booking_out(row, db)
+
+
+@app.get("/api/bookings")
+def list_bookings(
+    admin: models.User = Depends(auth.require_admin),
+    db: Session = Depends(get_db),
+):
+    return [
+        _booking_out(b, db)
+        for b in db.query(models.Booking)
+        .order_by(models.Booking.created_at.desc())
+        .all()
+    ]
+
+
+@app.post("/api/bookings/{booking_id}/cancel")
+def cancel_booking(
+    booking_id: int,
+    admin: models.User = Depends(auth.require_admin),
+    db: Session = Depends(get_db),
+):
+    row = db.get(models.Booking, booking_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if row.status == "cancelled":
+        raise HTTPException(status_code=409, detail="Booking already cancelled")
+    slot = db.get(models.AvailabilitySlot, row.slot_id)
+    row.status = "cancelled"
+    row.cancelled_at = datetime.utcnow()
+    if slot is not None:
+        slot.status = "open"
+    db.commit()
+    db.refresh(row)
+    return _booking_out(row, db)
 
 
 # ------------------------------- Outreach --------------------------------
@@ -579,6 +696,897 @@ def outreach_stats(
     }
 
 
+# ------------------ Core 1: audiences & contacts -----------------------
+# The platform takes in who to reach. Org lists are shared WITH the
+# org's agreement — the platform provides the intake, it does not take
+# lists. Seed ZERO contacts: no roster exists.
+
+
+def _parse_json_list(raw: str) -> list:
+    try:
+        parsed = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _contact_out(row: models.Contact) -> dict:
+    return {
+        "id": row.id,
+        "audience_id": row.audience_id,
+        "name": row.name,
+        "email": row.email,
+        "source_org": row.source_org,
+        "interests": _parse_json_list(row.interests),
+        "tags": _parse_json_list(row.tags),
+        "source": row.source,
+        "opted_out": bool(row.opted_out),
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+def _audience_out(row: models.Audience, db: Session) -> dict:
+    total = (
+        db.query(func.count(models.Contact.id))
+        .filter(models.Contact.audience_id == row.id)
+        .scalar()
+        or 0
+    )
+    opted_out = (
+        db.query(func.count(models.Contact.id))
+        .filter(
+            models.Contact.audience_id == row.id,
+            models.Contact.opted_out == 1,
+        )
+        .scalar()
+        or 0
+    )
+    return {
+        "id": row.id,
+        "name": row.name,
+        "source_org": row.source_org,
+        "description": row.description,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "contact_count": total,
+        "opted_out_count": opted_out,
+    }
+
+
+def _valid_email(email: str) -> bool:
+    email = email.strip().lower()
+    if not email or " " in email or "@" not in email:
+        return False
+    local, _, domain = email.partition("@")
+    return bool(local) and "." in domain
+
+
+def _parse_contacts_csv(text: str, default_org: str = "") -> tuple[list, list]:
+    """Parse a contacts CSV (columns: name, email, org, interests).
+
+    Interests are separated by semicolons. Returns (valid_rows, errors)
+    where each valid row is {name, email, source_org, interests} and each
+    error is {row, reason}. Row numbers are 1-based data rows.
+    """
+    reader = csv.DictReader(io.StringIO(text))
+    if reader.fieldnames is None:
+        return [], [{"row": 0, "reason": "Empty file — expected a header row"}]
+    headers = {h.strip().lower(): h for h in reader.fieldnames if h}
+    if "email" not in headers:
+        return [], [{"row": 0, "reason": "Missing required column: email"}]
+    email_key = headers["email"]
+    name_key = headers.get("name")
+    org_key = headers.get("org")
+    interests_key = headers.get("interests")
+    valid: list = []
+    errors: list = []
+    for i, raw in enumerate(reader, start=1):
+        if raw is None:
+            continue
+        email = (raw.get(email_key) or "").strip().lower()
+        if not email:
+            if not any((v or "").strip() for v in raw.values()):
+                continue  # blank line
+            errors.append({"row": i, "reason": "Missing email"})
+            continue
+        if not _valid_email(email):
+            errors.append({"row": i, "reason": f"Invalid email: {email}"})
+            continue
+        name = (raw.get(name_key) or "").strip() if name_key else ""
+        org = (raw.get(org_key) or "").strip() if org_key else ""
+        interests_raw = (
+            (raw.get(interests_key) or "").strip() if interests_key else ""
+        )
+        interests = [
+            part.strip() for part in interests_raw.split(";") if part.strip()
+        ]
+        valid.append(
+            {
+                "name": name,
+                "email": email,
+                "source_org": org or default_org,
+                "interests": interests,
+            }
+        )
+    return valid, errors
+
+
+@app.post("/api/audiences", status_code=201)
+def create_audience(
+    payload: schemas.AudienceCreate,
+    admin: models.User = Depends(auth.require_admin),
+    db: Session = Depends(get_db),
+):
+    if not payload.name.strip():
+        raise HTTPException(status_code=400, detail="Audience name is required")
+    row = models.Audience(
+        name=payload.name.strip(),
+        source_org=payload.source_org.strip(),
+        description=payload.description.strip(),
+        created_by=admin.id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _audience_out(row, db)
+
+
+@app.get("/api/audiences")
+def list_audiences(
+    admin: models.User = Depends(auth.require_admin),
+    db: Session = Depends(get_db),
+):
+    return [
+        _audience_out(a, db)
+        for a in db.query(models.Audience)
+        .order_by(models.Audience.created_at.desc())
+        .all()
+    ]
+
+
+@app.get("/api/audiences/{audience_id}")
+def get_audience(
+    audience_id: int,
+    admin: models.User = Depends(auth.require_admin),
+    db: Session = Depends(get_db),
+):
+    row = db.get(models.Audience, audience_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Audience not found")
+    out = _audience_out(row, db)
+    out["contacts"] = [
+        _contact_out(c)
+        for c in db.query(models.Contact)
+        .filter(models.Contact.audience_id == audience_id)
+        .order_by(models.Contact.email)
+        .all()
+    ]
+    return out
+
+
+@app.post("/api/audiences/{audience_id}/contacts", status_code=201)
+def add_contact(
+    audience_id: int,
+    payload: schemas.ContactCreate,
+    admin: models.User = Depends(auth.require_admin),
+    db: Session = Depends(get_db),
+):
+    audience = db.get(models.Audience, audience_id)
+    if audience is None:
+        raise HTTPException(status_code=404, detail="Audience not found")
+    email = payload.email.strip().lower()
+    if not _valid_email(email):
+        raise HTTPException(status_code=400, detail="A valid email is required")
+    existing = (
+        db.query(models.Contact)
+        .filter(
+            models.Contact.audience_id == audience_id,
+            models.Contact.email == email,
+        )
+        .first()
+    )
+    if existing is not None:
+        raise HTTPException(
+            status_code=409, detail="That email is already in this audience"
+        )
+    row = models.Contact(
+        audience_id=audience_id,
+        name=payload.name.strip(),
+        email=email,
+        source_org=payload.source_org.strip() or audience.source_org,
+        interests=json.dumps(payload.interests),
+        tags=json.dumps(payload.tags),
+        source="manual",
+        opted_out=0,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _contact_out(row)
+
+
+@app.patch("/api/audiences/{audience_id}/contacts/{contact_id}")
+def update_contact(
+    audience_id: int,
+    contact_id: int,
+    payload: schemas.ContactUpdate,
+    admin: models.User = Depends(auth.require_admin),
+    db: Session = Depends(get_db),
+):
+    row = (
+        db.query(models.Contact)
+        .filter(
+            models.Contact.id == contact_id,
+            models.Contact.audience_id == audience_id,
+        )
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    if payload.name is not None:
+        row.name = payload.name.strip()
+    if payload.interests is not None:
+        row.interests = json.dumps(payload.interests)
+    if payload.tags is not None:
+        row.tags = json.dumps(payload.tags)
+    if payload.opted_out is not None:
+        row.opted_out = 1 if payload.opted_out else 0
+    db.commit()
+    db.refresh(row)
+    return _contact_out(row)
+
+
+@app.delete("/api/audiences/{audience_id}/contacts/{contact_id}")
+def delete_contact(
+    audience_id: int,
+    contact_id: int,
+    admin: models.User = Depends(auth.require_admin),
+    db: Session = Depends(get_db),
+):
+    row = (
+        db.query(models.Contact)
+        .filter(
+            models.Contact.id == contact_id,
+            models.Contact.audience_id == audience_id,
+        )
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/audiences/contacts/template")
+def contacts_template(
+    admin: models.User = Depends(auth.require_admin),
+):
+    return PlainTextResponse(
+        "name,email,org,interests\n",
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=contacts-template.csv"
+        },
+    )
+
+
+@app.post("/api/audiences/{audience_id}/contacts/upload")
+async def upload_contacts(
+    audience_id: int,
+    file: UploadFile = File(...),
+    preview: str = Form(default="false"),
+    admin: models.User = Depends(auth.require_admin),
+    db: Session = Depends(get_db),
+):
+    audience = db.get(models.Audience, audience_id)
+    if audience is None:
+        raise HTTPException(status_code=404, detail="Audience not found")
+    raw = await file.read()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(
+            status_code=400, detail="File must be UTF-8 CSV text"
+        )
+    valid, errors = _parse_contacts_csv(text, default_org=audience.source_org)
+    is_preview = preview.strip().lower() in {"true", "1", "yes"}
+    if is_preview:
+        return {
+            "preview": True,
+            "valid_rows": len(valid),
+            "invalid_rows": len(errors),
+            "errors": errors,
+            "sample": valid[:5],
+        }
+    imported = 0
+    skipped: list = list(errors)
+    for entry in valid:
+        existing = (
+            db.query(models.Contact)
+            .filter(
+                models.Contact.audience_id == audience_id,
+                models.Contact.email == entry["email"],
+            )
+            .first()
+        )
+        if existing is not None:
+            skipped.append(
+                {
+                    "row": None,
+                    "reason": f"Already in this audience: {entry['email']}",
+                }
+            )
+            continue
+        db.add(
+            models.Contact(
+                audience_id=audience_id,
+                name=entry["name"],
+                email=entry["email"],
+                source_org=entry["source_org"],
+                interests=json.dumps(entry["interests"]),
+                tags="[]",
+                source="upload",
+                opted_out=0,
+            )
+        )
+        imported += 1
+    db.commit()
+    return {
+        "preview": False,
+        "imported": imported,
+        "skipped": len(skipped),
+        "errors": skipped,
+    }
+
+
+# ---------------------- Org-rep submissions ------------------------------
+# An org representative submits their group's contacts; submissions land
+# as "pending review" and staff approve them into an audience — never
+# auto-added.
+
+
+def _submission_out(row: models.OrgSubmission) -> dict:
+    return {
+        "id": row.id,
+        "org_name": row.org_name,
+        "rep_name": row.rep_name,
+        "rep_email": row.rep_email,
+        "notes": row.notes,
+        "contacts": _parse_json_list(row.contacts_json),
+        "status": row.status,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "reviewed_at": row.reviewed_at.isoformat()
+        if row.reviewed_at
+        else None,
+    }
+
+
+@app.post("/api/org-submissions", status_code=201)
+async def create_org_submission(request: Request, db: Session = Depends(get_db)):
+    ctype = request.headers.get("content-type", "")
+    org_name = rep_name = rep_email = notes = ""
+    contacts: list = []
+    if "application/json" in ctype:
+        try:
+            payload = schemas.OrgSubmissionCreate(**(await request.json()))
+        except Exception as exc:  # noqa: BLE001 - pydantic validation
+            raise HTTPException(status_code=422, detail=str(exc))
+        org_name, rep_name, rep_email, notes = (
+            payload.org_name,
+            payload.rep_name,
+            payload.rep_email,
+            payload.notes,
+        )
+        contacts = [
+            {
+                "name": c.name.strip(),
+                "email": c.email.strip().lower(),
+                "interests": c.interests,
+            }
+            for c in payload.contacts
+        ]
+    else:
+        form = await request.form()
+        org_name = str(form.get("org_name") or "").strip()
+        rep_name = str(form.get("rep_name") or "").strip()
+        rep_email = str(form.get("rep_email") or "").strip().lower()
+        notes = str(form.get("notes") or "").strip()
+        upload = form.get("contacts_file")
+        if upload is not None and hasattr(upload, "read"):
+            raw = await upload.read()
+            try:
+                text = raw.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                raise HTTPException(
+                    status_code=400, detail="File must be UTF-8 CSV text"
+                )
+            valid, _errors = _parse_contacts_csv(text, default_org=org_name)
+            contacts = valid
+    if not org_name:
+        raise HTTPException(status_code=400, detail="Organization name is required")
+    if not _valid_email(rep_email):
+        raise HTTPException(
+            status_code=400, detail="A valid representative email is required"
+        )
+    clean = [c for c in contacts if _valid_email(c.get("email", ""))]
+    if not clean:
+        raise HTTPException(
+            status_code=400,
+            detail="No valid contacts were submitted — check the emails",
+        )
+    row = models.OrgSubmission(
+        org_name=org_name,
+        rep_name=rep_name,
+        rep_email=rep_email,
+        notes=notes,
+        contacts_json=json.dumps(clean),
+        status="pending",
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _submission_out(row)
+
+
+@app.get("/api/org-submissions")
+def list_org_submissions(
+    admin: models.User = Depends(auth.require_admin),
+    db: Session = Depends(get_db),
+):
+    return [
+        _submission_out(s)
+        for s in db.query(models.OrgSubmission)
+        .order_by(models.OrgSubmission.created_at.desc())
+        .all()
+    ]
+
+
+@app.post("/api/org-submissions/{submission_id}/review")
+def review_org_submission(
+    submission_id: int,
+    payload: schemas.OrgSubmissionReview,
+    admin: models.User = Depends(auth.require_admin),
+    db: Session = Depends(get_db),
+):
+    row = db.get(models.OrgSubmission, submission_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    if row.status != "pending":
+        raise HTTPException(
+            status_code=409, detail=f"Submission already {row.status}"
+        )
+    if payload.decision == "reject":
+        row.status = "rejected"
+        row.reviewed_by = admin.id
+        row.reviewed_at = datetime.utcnow()
+        db.commit()
+        db.refresh(row)
+        return _submission_out(row)
+    # Approve: add contacts to an existing audience or a new one named
+    # after the org. Duplicates (same email already in that audience)
+    # are skipped, never duplicated.
+    audience = None
+    if payload.audience_id is not None:
+        audience = db.get(models.Audience, payload.audience_id)
+        if audience is None:
+            raise HTTPException(status_code=404, detail="Audience not found")
+    else:
+        audience = (
+            db.query(models.Audience)
+            .filter(models.Audience.name == row.org_name)
+            .first()
+        )
+        if audience is None:
+            audience = models.Audience(
+                name=row.org_name,
+                source_org=row.org_name,
+                description=f"Contacts submitted by {row.org_name}.",
+                created_by=admin.id,
+            )
+            db.add(audience)
+            db.flush()
+    added = 0
+    for entry in _parse_json_list(row.contacts_json):
+        email = (entry.get("email") or "").strip().lower()
+        if not _valid_email(email):
+            continue
+        existing = (
+            db.query(models.Contact)
+            .filter(
+                models.Contact.audience_id == audience.id,
+                models.Contact.email == email,
+            )
+            .first()
+        )
+        if existing is not None:
+            continue
+        db.add(
+            models.Contact(
+                audience_id=audience.id,
+                name=(entry.get("name") or "").strip(),
+                email=email,
+                source_org=row.org_name,
+                interests=json.dumps(entry.get("interests") or []),
+                tags="[]",
+                source="org-submission",
+                opted_out=0,
+            )
+        )
+        added += 1
+    row.status = "approved"
+    row.reviewed_by = admin.id
+    row.reviewed_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    out = _submission_out(row)
+    out["audience_id"] = audience.id
+    out["contacts_added"] = added
+    return out
+
+
+# ------------------------- Core 2: campaigns -----------------------------
+# Campaigns ARE the newsletter: staff compose an issue (subject +
+# message) and pick resources from the platform's real resource list to
+# feature in it; sending goes to confirmed newsletter subscribers
+# and/or an audience segment. Preview renders the issue with the chosen
+# resources and the exact recipient count (opted-out excluded).
+# Sending needs SMTP (SMTP_HOST/PORT/USER/PASS/FROM); without it the
+# campaign is saved as "ready to send" (status "queued") with content +
+# recipients visible — never claimed sent.
+
+
+def _featured_resources(db: Session, campaign: models.Campaign) -> list:
+    """The real resources featured in this issue, in stored order."""
+    out = []
+    for rid in _parse_json_list(campaign.resource_ids):
+        row = db.get(models.Resource, rid)
+        if row is None:
+            continue
+        out.append(
+            {
+                "id": row.id,
+                "title": row.title,
+                "description": row.description,
+                "category": row.category,
+                "audience": row.audience,
+                "link": row.link,
+            }
+        )
+    return out
+
+
+def _issue_body(campaign: models.Campaign, db: Session) -> str:
+    """The email body for a sent issue: the staff message plus the
+    featured resources (title + link) appended."""
+    body = campaign.body.rstrip()
+    featured = _featured_resources(db, campaign)
+    if not featured:
+        return body
+    lines = [body, "", "", "Featured resources from the Center:"]
+    for r in featured:
+        line = f"- {r['title']}"
+        if r["link"]:
+            line += f" — {r['link']}"
+        lines.append(line)
+        if r["description"]:
+            lines.append(f"  {r['description']}")
+    return "\n".join(lines)
+
+
+def _validate_resource_ids(db: Session, resource_ids: list) -> None:
+    for rid in resource_ids:
+        if db.get(models.Resource, rid) is None:
+            raise HTTPException(
+                status_code=404, detail=f"Resource {rid} not found"
+            )
+
+
+def _campaign_recipients(db: Session, campaign: models.Campaign) -> list:
+    """Compute the exact recipient list for a campaign, live.
+
+    Contacts in the selected audiences (or all contacts when only an
+    org filter is set), filtered by org and interest, with opted-out
+    contacts excluded. Contacts contribute NOTHING when the issue
+    targets subscribers only (no audience, no org filter) — a
+    subscribers-only issue goes to subscribers alone. Optionally adds
+    confirmed opt-in newsletter subscribers. Deduplicated by email.
+    """
+    try:
+        audience_ids = [int(x) for x in json.loads(campaign.audience_ids or "[]")]
+    except (json.JSONDecodeError, ValueError):
+        audience_ids = []
+    seen: dict[str, dict] = {}
+    if audience_ids or campaign.org_filter:
+        query = db.query(models.Contact).filter(models.Contact.opted_out == 0)
+        if audience_ids:
+            query = query.filter(models.Contact.audience_id.in_(audience_ids))
+        if campaign.org_filter:
+            query = query.filter(models.Contact.source_org == campaign.org_filter)
+        for c in query.order_by(models.Contact.email).all():
+            interests = _parse_json_list(c.interests) + _parse_json_list(c.tags)
+            if campaign.interest_filter:
+                needle = campaign.interest_filter.strip().lower()
+                if not any(needle in i.lower() for i in interests):
+                    continue
+            key = c.email.strip().lower()
+            if key not in seen:
+                seen[key] = {"email": c.email, "name": c.name, "source": c.source}
+    if campaign.include_self_signup:
+        subs = (
+            db.query(models.NewsletterSubscriber)
+            .filter(models.NewsletterSubscriber.status == "confirmed")
+            .all()
+        )
+        for s in subs:
+            key = s.email.strip().lower()
+            if key not in seen:
+                seen[key] = {
+                    "email": s.email,
+                    "name": s.name,
+                    "source": "self-signup",
+                }
+    return list(seen.values())
+
+
+def _campaign_out(row: models.Campaign, db: Session) -> dict:
+    stored = (
+        db.query(func.count(models.CampaignRecipient.id))
+        .filter(models.CampaignRecipient.campaign_id == row.id)
+        .scalar()
+        or 0
+    )
+    count = stored if stored else len(_campaign_recipients(db, row))
+    return {
+        "id": row.id,
+        "subject": row.subject,
+        "body": row.body,
+        "sender_name": row.sender_name,
+        "resource_ids": _parse_json_list(row.resource_ids),
+        "featured_resources": _featured_resources(db, row),
+        "audience_ids": _parse_json_list(row.audience_ids),
+        "org_filter": row.org_filter,
+        "interest_filter": row.interest_filter,
+        "include_self_signup": bool(row.include_self_signup),
+        "status": row.status,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "sent_at": row.sent_at.isoformat() if row.sent_at else None,
+        "error": row.error,
+        "recipient_count": count,
+    }
+
+
+@app.post("/api/campaigns", status_code=201)
+def create_campaign(
+    payload: schemas.CampaignCreate,
+    admin: models.User = Depends(auth.require_admin),
+    db: Session = Depends(get_db),
+):
+    if not payload.subject.strip():
+        raise HTTPException(status_code=400, detail="Subject is required")
+    if not payload.body.strip():
+        raise HTTPException(status_code=400, detail="Body is required")
+    if (
+        not payload.audience_ids
+        and not payload.org_filter.strip()
+        and not payload.include_self_signup
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Select at least one audience, an organization filter, "
+            "or newsletter subscribers",
+        )
+    _validate_resource_ids(db, payload.resource_ids)
+    for audience_id in payload.audience_ids:
+        if db.get(models.Audience, audience_id) is None:
+            raise HTTPException(
+                status_code=404, detail=f"Audience {audience_id} not found"
+            )
+    row = models.Campaign(
+        subject=payload.subject.strip(),
+        body=payload.body.strip(),
+        sender_name=payload.sender_name.strip() or "Center for Belonging",
+        resource_ids=json.dumps(payload.resource_ids),
+        audience_ids=json.dumps(payload.audience_ids),
+        org_filter=payload.org_filter.strip(),
+        interest_filter=payload.interest_filter.strip(),
+        include_self_signup=1 if payload.include_self_signup else 0,
+        status="draft",
+        created_by=admin.id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _campaign_out(row, db)
+
+
+@app.get("/api/campaigns")
+def list_campaigns(
+    admin: models.User = Depends(auth.require_admin),
+    db: Session = Depends(get_db),
+):
+    return [
+        _campaign_out(c, db)
+        for c in db.query(models.Campaign)
+        .order_by(models.Campaign.created_at.desc())
+        .all()
+    ]
+
+
+@app.get("/api/campaigns/{campaign_id}")
+def get_campaign(
+    campaign_id: int,
+    admin: models.User = Depends(auth.require_admin),
+    db: Session = Depends(get_db),
+):
+    row = db.get(models.Campaign, campaign_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    out = _campaign_out(row, db)
+    stored = (
+        db.query(models.CampaignRecipient)
+        .filter(models.CampaignRecipient.campaign_id == campaign_id)
+        .order_by(models.CampaignRecipient.email)
+        .all()
+    )
+    if stored:
+        out["recipients"] = [
+            {
+                "email": r.email,
+                "name": r.name,
+                "source": r.source,
+                "status": r.status,
+                "error": r.error,
+            }
+            for r in stored
+        ]
+    else:
+        out["recipients"] = _campaign_recipients(db, row)
+    return out
+
+
+@app.patch("/api/campaigns/{campaign_id}")
+def update_campaign(
+    campaign_id: int,
+    payload: schemas.CampaignUpdate,
+    admin: models.User = Depends(auth.require_admin),
+    db: Session = Depends(get_db),
+):
+    row = db.get(models.Campaign, campaign_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if row.status != "draft":
+        raise HTTPException(
+            status_code=409, detail="Only draft campaigns can be edited"
+        )
+    if payload.subject is not None:
+        row.subject = payload.subject.strip()
+    if payload.body is not None:
+        row.body = payload.body.strip()
+    if payload.sender_name is not None:
+        row.sender_name = payload.sender_name.strip() or "Center for Belonging"
+    if payload.resource_ids is not None:
+        _validate_resource_ids(db, payload.resource_ids)
+        row.resource_ids = json.dumps(payload.resource_ids)
+    if payload.audience_ids is not None:
+        for audience_id in payload.audience_ids:
+            if db.get(models.Audience, audience_id) is None:
+                raise HTTPException(
+                    status_code=404, detail=f"Audience {audience_id} not found"
+                )
+        row.audience_ids = json.dumps(payload.audience_ids)
+    if payload.org_filter is not None:
+        row.org_filter = payload.org_filter.strip()
+    if payload.interest_filter is not None:
+        row.interest_filter = payload.interest_filter.strip()
+    if payload.include_self_signup is not None:
+        row.include_self_signup = 1 if payload.include_self_signup else 0
+    if not row.subject or not row.body:
+        raise HTTPException(status_code=400, detail="Subject and body are required")
+    if (
+        not _parse_json_list(row.audience_ids)
+        and not row.org_filter
+        and not row.include_self_signup
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Select at least one audience, an organization filter, "
+            "or newsletter subscribers",
+        )
+    db.commit()
+    db.refresh(row)
+    return _campaign_out(row, db)
+
+
+@app.post("/api/campaigns/{campaign_id}/send")
+def send_campaign(
+    campaign_id: int,
+    request: Request,
+    admin: models.User = Depends(auth.require_admin),
+    db: Session = Depends(get_db),
+):
+    row = db.get(models.Campaign, campaign_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if row.status == "sent":
+        raise HTTPException(status_code=409, detail="Campaign already sent")
+    recipients = _campaign_recipients(db, row)
+    if not recipients:
+        raise HTTPException(
+            status_code=400, detail="No recipients match this campaign"
+        )
+    # Materialize per-recipient rows (queued) exactly once.
+    existing = {
+        r.email.lower()
+        for r in db.query(models.CampaignRecipient)
+        .filter(models.CampaignRecipient.campaign_id == campaign_id)
+        .all()
+    }
+    for r in recipients:
+        if r["email"].lower() not in existing:
+            db.add(
+                models.CampaignRecipient(
+                    campaign_id=campaign_id,
+                    email=r["email"],
+                    name=r["name"],
+                    source=r["source"],
+                    status="queued",
+                )
+            )
+    db.commit()
+    if not mail.smtp_configured():
+        # No mail server: the campaign is ready to send, with content and
+        # recipients visible — but nothing is claimed sent.
+        row.status = "queued"
+        db.commit()
+        db.refresh(row)
+        return {
+            **_campaign_out(row, db),
+            "smtp_configured": False,
+            "message": "No SMTP configured — campaign saved as ready to send. "
+            "Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, and SMTP_FROM "
+            "to send (see DEPLOY_NOTES.md).",
+        }
+    base = (os.environ.get("FRONTEND_URL") or str(request.base_url)).rstrip("/")
+    unsubscribe_url = f"{base}/newsletter"
+    queued = (
+        db.query(models.CampaignRecipient)
+        .filter(
+            models.CampaignRecipient.campaign_id == campaign_id,
+            models.CampaignRecipient.status == "queued",
+        )
+        .all()
+    )
+    sent = failed = 0
+    issue_body = _issue_body(row, db)
+    for recipient in queued:
+        try:
+            mail.send_email(
+                recipient.email,
+                row.subject,
+                issue_body,
+                row.sender_name,
+                unsubscribe_url,
+            )
+            recipient.status = "sent"
+            recipient.sent_at = datetime.utcnow()
+            recipient.error = ""
+            sent += 1
+        except Exception as exc:  # noqa: BLE001 - record per-recipient
+            recipient.status = "failed"
+            recipient.error = str(exc)
+            failed += 1
+    row.status = "sent" if failed == 0 else "partially_sent"
+    row.sent_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return {
+        **_campaign_out(row, db),
+        "smtp_configured": True,
+        "sent": sent,
+        "failed": failed,
+    }
+
+
 # --------------------------- Dashboard / reports -------------------------
 # Everything here is computed from REAL database rows only. No fabricated
 # series, no placeholder numbers: an empty table contributes zero.
@@ -586,18 +1594,37 @@ def outreach_stats(
 
 def _dashboard_data(db: Session) -> dict:
     subscribers = db.query(models.NewsletterSubscriber).all()
-    appointments = db.query(models.Appointment).all()
     outreach = db.query(models.OutreachEntry).all()
     conferences = db.query(models.Conference).order_by(models.Conference.id).all()
     participation = db.query(models.ConferenceParticipation).all()
+    slots = db.query(models.AvailabilitySlot).all()
+    bookings = db.query(models.Booking).all()
+    campaigns = db.query(models.Campaign).all()
 
     totals = {
         "subscribers": len(subscribers),
         "confirmed_subscribers": sum(
             1 for s in subscribers if s.status == "confirmed"
         ),
-        "appointments_pending": sum(
-            1 for a in appointments if a.status == "pending"
+        "audiences": db.query(func.count(models.Audience.id)).scalar() or 0,
+        "contacts": db.query(func.count(models.Contact.id)).scalar() or 0,
+        "opted_out_contacts": (
+            db.query(func.count(models.Contact.id))
+            .filter(models.Contact.opted_out == 1)
+            .scalar()
+            or 0
+        ),
+        "campaigns": len(campaigns),
+        "campaigns_sent": sum(
+            1 for c in campaigns if c.status in {"sent", "partially_sent"}
+        ),
+        "open_slots": sum(1 for s in slots if s.status == "open"),
+        "upcoming_bookings": sum(
+            1
+            for b in bookings
+            if b.status == "booked"
+            and db.get(models.AvailabilitySlot, b.slot_id) is not None
+            and db.get(models.AvailabilitySlot, b.slot_id).date >= date.today()
         ),
         "resources": db.query(func.count(models.Resource.id)).scalar() or 0,
         "conferences": len(conferences),
@@ -629,10 +1656,16 @@ def _dashboard_data(db: Session) -> dict:
         {"month": m, "count": c} for m, c in sorted(sub_months.items())
     ]
 
-    appt_status = Counter(a.status for a in appointments)
-    appointments_by_status = {
-        s: appt_status.get(s, 0)
-        for s in ("pending", "confirmed", "declined", "completed")
+    booking_status = Counter(b.status for b in bookings)
+    bookings_by_status = {
+        s: booking_status.get(s, 0) for s in ("booked", "cancelled")
+    }
+    slot_status = Counter(s.status for s in slots)
+    slots_by_status = {s: slot_status.get(s, 0) for s in ("open", "booked")}
+    campaign_status = Counter(c.status for c in campaigns)
+    campaigns_by_status = {
+        s: campaign_status.get(s, 0)
+        for s in ("draft", "queued", "sent", "partially_sent")
     }
 
     return {
@@ -640,7 +1673,9 @@ def _dashboard_data(db: Session) -> dict:
         "participation_by_conference": participation_by_conference,
         "outreach_by_month": outreach_by_month,
         "subscribers_by_month": subscribers_by_month,
-        "appointments_by_status": appointments_by_status,
+        "bookings_by_status": bookings_by_status,
+        "slots_by_status": slots_by_status,
+        "campaigns_by_status": campaigns_by_status,
     }
 
 
@@ -664,11 +1699,32 @@ def reports_summary(
         by_program[o.program]["entries"] += 1
         by_program[o.program]["contacts"] += o.contacts_reached
     pending = (
-        db.query(models.Appointment)
-        .filter(models.Appointment.status == "pending")
-        .order_by(models.Appointment.created_at)
+        db.query(models.Booking)
+        .filter(models.Booking.status == "booked")
+        .order_by(models.Booking.created_at)
         .all()
     )
+    upcoming = []
+    for b in pending:
+        slot = db.get(models.AvailabilitySlot, b.slot_id)
+        if slot is None or slot.date < date.today():
+            continue
+        upcoming.append(
+            {
+                "id": b.id,
+                "name": b.name,
+                "email": b.email,
+                "purpose": b.purpose,
+                "date": slot.date.isoformat(),
+                "start_time": slot.start_time,
+                "end_time": slot.end_time,
+                "type": slot.type,
+                "host": slot.host,
+                "created_at": b.created_at.isoformat()
+                if b.created_at
+                else None,
+            }
+        )
     return {
         "totals": data["totals"],
         "participation_by_conference": data["participation_by_conference"],
@@ -680,26 +1736,25 @@ def reports_summary(
             ],
         },
         "subscriber_growth": data["subscribers_by_month"],
-        "open_appointments": {
-            "count": len(pending),
-            "appointments": [
-                {
-                    "id": a.id,
-                    "name": a.name,
-                    "email": a.email,
-                    "topic": a.topic,
-                    "preferred_date": a.preferred_date.isoformat()
-                    if a.preferred_date
-                    else None,
-                    "preferred_time": a.preferred_time,
-                    "created_at": a.created_at.isoformat()
-                    if a.created_at
-                    else None,
-                }
-                for a in pending
-            ],
+        "open_bookings": {
+            "count": len(upcoming),
+            "bookings": upcoming,
         },
-        "appointments_by_status": data["appointments_by_status"],
+        "bookings_by_status": data["bookings_by_status"],
+        "slots_by_status": data["slots_by_status"],
+        "campaigns_by_status": data["campaigns_by_status"],
+        "audiences": [
+            _audience_out(a, db)
+            for a in db.query(models.Audience)
+            .order_by(models.Audience.created_at.desc())
+            .all()
+        ],
+        "campaigns": [
+            _campaign_out(c, db)
+            for c in db.query(models.Campaign)
+            .order_by(models.Campaign.created_at.desc())
+            .all()
+        ],
     }
 
 

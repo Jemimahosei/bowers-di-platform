@@ -170,19 +170,52 @@ frontend/
   service serves API + static frontend — no second service, no cache
   layer, no background jobs. A working tool the Center can actually use
   beats a flashier architecture.
-- **Reach is the feature.** The newsletter and appointment booking exist
-  because jem's stated gap was reach: students who need help often never
-  find the Center. The newsletter is opt-in self-signup only — the
-  platform never holds a roster taken from URMC, NSBE, or CampusGroups
-  without those orgs' permission. People sign up themselves; orgs share
-  the signup link.
-- **Honest data, going forward.** Participation, subscribers, and
-  appointments start empty and are tracked from now on. The dashboard
-  charts only real DB rows — an empty chart is honest, a fabricated trend
-  line would not be. The 100+ students served, 3 initiatives, 2
-  departments, 100+ stakeholders, 40% utilization increase, and $4,000
-  budget are program-impact numbers from jem's own record, shown labeled
-  as such on the home page, not charted as fake time series.
+- **The newsletter is the core feature (Nov 20, 2026).** jem: the
+  newsletter should be the core because it sends the resources to
+  students at the Cornell domain. So the homepage leads with it (hero:
+  "The Center's resources, delivered to your Cornell inbox", subscribe
+  box, what subscribers get), nav puts Newsletter first, and the
+  campaign composer is reframed as composing a newsletter issue: staff
+  pick resources from the platform's real resource list to feature,
+  write the message, and send to subscribers and/or an audience. Public
+  signup accepts `@cornell.edu` addresses only, validated backend and
+  frontend ("Use your Cornell email to subscribe"); double opt-in
+  stays. Staff-imported org contacts are vetted by staff, not
+  domain-checked — but they should be Cornell students, since the
+  newsletter goes to the Cornell domain. The org audiences feed the
+  newsletter; they are not a separate channel from it.
+- **Reach is the feature — core-first reframe (Nov 10, 2026).** jem
+  reviewed the Nov 6 rebuild and said the core functionality and goal
+  were missing: a resource listing with a signup form is not the
+  platform. The platform's job is reach — the Center reaching the
+  students who need it — so the build is now organized around three
+  core features, and the homepage leads with them: (1) **the
+  newsletter** — issues built from the Center's real resources, sent
+  to students at the Cornell domain (see the bullet above);
+  (2) **audience intake from orgs** — staff take in who to reach by
+  CSV upload, manual add, or an org representative's submission, which
+  lands as pending review and is never auto-added; (3) **real
+  appointment booking** — staff add Dr. Roberts' availability as slots
+  and visitors book an open one. Resources and conferences remain, but
+  they are not the lead.
+- **Org lists only with agreement — the platform provides the intake,
+  it does not take lists.** The Nov 6 rule ("never hold a roster taken
+  from URMC, NSBE, or CampusGroups") was the honest reading of an
+  unsettled question; jem's core requirement is that the platform take
+  in who to reach. The resolved position: orgs share their lists with
+  their agreement, submissions are pending review until staff approve
+  them, and the permission note is stated in the UI and in
+  `DEPLOY_NOTES.md`. No org contacts, rosters, or agreements were
+  invented — zero contacts are seeded, and slots start empty until an
+  admin adds them.
+- **Honest data, going forward.** Participation, subscribers, audiences,
+  contacts, campaigns, slots, and bookings start empty and are tracked
+  from now on. The dashboard charts only real DB rows — an empty chart
+  is honest, a fabricated trend line would not be. The 100+ students
+  served, 3 initiatives, 2 departments, 100+ stakeholders, 40%
+  utilization increase, and $4,000 budget are program-impact numbers
+  from jem's own record, shown labeled as such on the home page, not
+  charted as fake time series.
 - **Auth is deliberately simple and documented as open.** Email/password
   with PBKDF2 hashing (stdlib only), DB session tokens, roles
   student/faculty/admin; registration always creates a student and an
@@ -190,7 +223,12 @@ frontend/
   allowlist vs open) is still an open question for jem and the Center —
   the simple flow is a placeholder that can be swapped, not a decision
   smuggled in.
-- **No mail server yet, by design.** Newsletter confirmation links are
+- **No mail server yet, by design — and nothing is faked as "sent".**
+  Campaigns send through SMTP configured with `SMTP_HOST`,
+  `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` (Gmail app password
+  or SendGrid — see `DEPLOY_NOTES.md`). While those are unset, a send
+  saves the campaign as "ready to send" (`status=queued`) with its full
+  content and recipient list visible. Newsletter confirmation links are
   shown on the signup confirmation page instead of emailed, because no
   SMTP service is wired up. The double opt-in token flow already exists,
   so adding SendGrid/SMTP is a one-endpoint change. Nothing is faked as

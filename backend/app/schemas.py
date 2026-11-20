@@ -191,42 +191,267 @@ class NewsletterUnsubscribe(BaseModel):
 
 
 # ----------------------------- Appointments ------------------------------
+# Slot-based booking with Dr. LeeAnn Roberts (replaces the old request
+# form). Slots start empty; staff add availability.
 
 
-class AppointmentCreate(BaseModel):
-    name: str
-    email: str
-    topic: str = ""
-    preferred_date: _date | None = None
-    preferred_time: str | None = None
-    notes: str = ""
+class SlotCreate(BaseModel):
+    date: _date
+    start_time: str
+    end_time: str
+    type: str = "call"
+    host: str = "Dr. LeeAnn Roberts"
+
+    @field_validator("type")
+    @classmethod
+    def _valid_type(cls, v: str) -> str:
+        if v not in {"call", "in-person"}:
+            raise ValueError("type must be call or in-person")
+        return v
+
+    @field_validator("start_time", "end_time")
+    @classmethod
+    def _valid_time(cls, v: str) -> str:
+        parts = v.split(":")
+        if len(parts) != 2 or not all(p.isdigit() for p in parts):
+            raise ValueError("time must be HH:MM")
+        hh, mm = int(parts[0]), int(parts[1])
+        if not (0 <= hh <= 23 and 0 <= mm <= 59):
+            raise ValueError("time must be a valid 24-hour HH:MM")
+        return f"{hh:02d}:{mm:02d}"
 
 
-class AppointmentOut(BaseModel):
+class SlotOut(BaseModel):
     id: int
-    name: str
-    email: str
-    topic: str
-    preferred_date: _date | None = None
-    preferred_time: str | None = None
-    notes: str
+    date: _date
+    start_time: str
+    end_time: str
+    type: str
+    host: str
     status: str
     created_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
-class AppointmentStatusUpdate(BaseModel):
-    status: str
+class BookingCreate(BaseModel):
+    name: str
+    email: str
+    purpose: str = ""
 
-    @field_validator("status")
+
+class BookingOut(BaseModel):
+    id: int
+    slot_id: int
+    name: str
+    email: str
+    purpose: str
+    status: str
+    created_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    slot: SlotOut | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ------------------------- Audiences & contacts --------------------------
+
+
+class AudienceCreate(BaseModel):
+    name: str
+    source_org: str = ""
+    description: str = ""
+
+
+class AudienceOut(BaseModel):
+    id: int
+    name: str
+    source_org: str
+    description: str
+    created_at: datetime | None = None
+    contact_count: int = 0
+    opted_out_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ContactCreate(BaseModel):
+    name: str = ""
+    email: str
+    source_org: str = ""
+    interests: list[str] = []
+    tags: list[str] = []
+
+
+class ContactOut(BaseModel):
+    id: int
+    audience_id: int
+    name: str
+    email: str
+    source_org: str
+    interests: list[str] = []
+    tags: list[str] = []
+    source: str
+    opted_out: bool = False
+    created_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("interests", "tags", mode="before")
     @classmethod
-    def _valid_status(cls, v: str) -> str:
-        if v not in {"pending", "confirmed", "declined", "completed"}:
-            raise ValueError(
-                "status must be pending, confirmed, declined, or completed"
-            )
+    def _parse_json_list(cls, v):
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+            except json.JSONDecodeError:
+                return []
+            return parsed if isinstance(parsed, list) else []
+        return v or []
+
+    @field_validator("opted_out", mode="before")
+    @classmethod
+    def _to_bool(cls, v):
+        return bool(v)
+
+
+class ContactUpdate(BaseModel):
+    name: str | None = None
+    interests: list[str] | None = None
+    tags: list[str] | None = None
+    opted_out: bool | None = None
+
+
+class ContactIn(BaseModel):
+    """One contact row inside an org submission."""
+
+    name: str = ""
+    email: str
+    interests: list[str] = []
+
+
+class OrgSubmissionCreate(BaseModel):
+    org_name: str
+    rep_name: str = ""
+    rep_email: str
+    notes: str = ""
+    contacts: list[ContactIn] = []
+
+
+class OrgSubmissionOut(BaseModel):
+    id: int
+    org_name: str
+    rep_name: str
+    rep_email: str
+    notes: str
+    contacts: list[ContactIn] = []
+    status: str
+    created_at: datetime | None = None
+    reviewed_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("contacts", mode="before")
+    @classmethod
+    def _parse_contacts(cls, v):
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+            except json.JSONDecodeError:
+                return []
+            return parsed if isinstance(parsed, list) else []
+        return v or []
+
+
+class OrgSubmissionReview(BaseModel):
+    decision: str
+    # Optional: add approved contacts to this existing audience; otherwise
+    # a new audience is created from the org name.
+    audience_id: int | None = None
+
+    @field_validator("decision")
+    @classmethod
+    def _valid_decision(cls, v: str) -> str:
+        if v not in {"approve", "reject"}:
+            raise ValueError("decision must be approve or reject")
         return v
+
+
+# ------------------------------ Campaigns --------------------------------
+
+
+class CampaignCreate(BaseModel):
+    subject: str
+    body: str
+    sender_name: str = "Center for Belonging"
+    # Resources from the platform's real resource list to feature in
+    # this newsletter issue (ids, in display order).
+    resource_ids: list[int] = []
+    audience_ids: list[int] = []
+    org_filter: str = ""
+    interest_filter: str = ""
+    include_self_signup: bool = False
+
+
+class CampaignUpdate(BaseModel):
+    subject: str | None = None
+    body: str | None = None
+    sender_name: str | None = None
+    resource_ids: list[int] | None = None
+    audience_ids: list[int] | None = None
+    org_filter: str | None = None
+    interest_filter: str | None = None
+    include_self_signup: bool | None = None
+
+
+class CampaignRecipientOut(BaseModel):
+    id: int
+    campaign_id: int
+    email: str
+    name: str
+    source: str
+    status: str
+    error: str = ""
+    sent_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CampaignOut(BaseModel):
+    id: int
+    subject: str
+    body: str
+    sender_name: str
+    resource_ids: list[int] = []
+    featured_resources: list[ResourceOut] = []
+    audience_ids: list[int] = []
+    org_filter: str
+    interest_filter: str
+    include_self_signup: bool = False
+    status: str
+    created_at: datetime | None = None
+    sent_at: datetime | None = None
+    error: str = ""
+    recipient_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("resource_ids", "audience_ids", mode="before")
+    @classmethod
+    def _parse_ids(cls, v):
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+            except json.JSONDecodeError:
+                return []
+            if not isinstance(parsed, list):
+                return []
+            return [int(x) for x in parsed]
+        return v or []
+
+    @field_validator("include_self_signup", mode="before")
+    @classmethod
+    def _to_bool(cls, v):
+        return bool(v)
 
 
 # ------------------------------- Outreach --------------------------------
