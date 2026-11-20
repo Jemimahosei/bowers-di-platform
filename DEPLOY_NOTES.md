@@ -3,19 +3,113 @@
 Backend rebuilt Nov 6, 2026 to the real spec (`REAL-SPEC.md`). Nothing was
 pushed; no live service was touched.
 
+## Email confirmation (Nov 20, 2026) — the confirmation email is the channel
+
+jem: when someone signs up with their name, they should receive an
+email asking them to confirm their subscription. So the confirmation
+email is now the channel — not an on-page link.
+
+- **What happens on signup.** `POST /api/newsletter/signup` still
+  creates the pending subscriber and token, then — when SMTP is
+  configured — sends the confirmation email (`backend/app/mail.py`:
+  `send_confirmation_email`). The email is addressed by name
+  ("Hi [Name]," — "Hi there," when no name was given, e.g. the
+  homepage form is email-only), says they signed up for the Center
+  for Belonging newsletter, carries the confirmation link, and says
+  what they'll get (resources and opportunities in every issue).
+  From address = `SMTP_FROM`. The confirm endpoint and token flow are
+  unchanged; double opt-in stays (an unconfirmed address receives
+  nothing else).
+- **What the page shows.** After signup, the page shows "Check your
+  inbox — we sent a confirmation email to [their Cornell address]"
+  (plus a note to check spam). **No confirmation link or button on
+  the homepage, ever.**
+- **Fallback only when SMTP is unset.** If sending fails because no
+  mail server is configured, the API answers `email_sent: false` +
+  the token, and the frontend shows the confirmation link on
+  **/newsletter only**, clearly labeled as a temporary fallback ("No
+  mail server is connected yet, so your confirmation link is shown
+  here — once the Center connects its email account, this will arrive
+  by email instead"). When SMTP is configured, no on-page link
+  appears anywhere. If SMTP is configured but the send itself fails,
+  the same /newsletter-only link appears with a "we couldn't send
+  it" label. Nothing is ever claimed sent when it was not.
+- **The URL must not fold (bug found by the test).** The first
+  version of the email came out quoted-printable, which folds long
+  lines at 76 chars — and the confirmation URL is long enough to be
+  split mid-token, which breaks the link for anyone who copies it.
+  The confirmation email is therefore plain ASCII with
+  `cte="7bit"`, so the URL line goes out whole. (Campaign emails
+  still use the default encoding — staff-composed content, unchanged.)
+- **Sender (decided by jem, Nov 20, 2026).** The Bowers emails send
+  from her Gmail account connected to Muse:
+  `SMTP_USER` = `writesaifreewalter@gmail.com`,
+  `SMTP_FROM` = `writesaifreewalter@gmail.com`,
+  `SMTP_HOST` = `smtp.gmail.com`, `SMTP_PORT` = `587`,
+  `SMTP_PASS` = a Gmail **app password jem generates herself** (never
+  put the actual password in any file). The env vars are set in the
+  Render dashboard → service → Environment after this rework is
+  pushed. Until they are set, signups use the /newsletter-only
+  fallback link and issues queue as "ready to send".
+
+## Welcoming homepage + routing fixes (Nov 20, 2026)
+
+jem looked at the live homepage and said the main page should welcome
+students and prompt them to sign up for a constant supply of resources
+and opportunities. She had just signed up with her Cornell email and
+the homepage was showing the post-signup confirmation box. Reworked:
+
+- **Welcoming hero, speaking to students.** The hero now welcomes
+  students directly ("Welcome — the Center's resources and
+  opportunities, in your inbox") and invites them to sign up once for
+  a steady, ongoing supply: every issue brings real resources plus
+  opportunities (conference funding and deadlines, scholarships and
+  paid opportunities, events and programs). The "You belong here." —
+  Hakim Weatherspoon quote stays, as does the Cornell design. The
+  signup prompt is in the hero itself: Cornell email field + Sign up
+  button, one line saying Cornell email only.
+- **Confirmation step moved off the homepage.** After signing up on
+  the homepage, the page shows only a short note ("You're almost in —
+  head to the newsletter page to confirm your subscription"). The full
+  confirmation step (confirmation link + Confirm button + the honest
+  no-SMTP note) lives on /newsletter only. Same endpoint and token
+  flow — only the placement changed. The homepage hands the token to
+  /newsletter via sessionStorage (`bowers-pending-confirmation`); if
+  that handoff is lost (e.g. a new tab), signing up again on
+  /newsletter issues a fresh token, so the step still works.
+- **What you'll get, every issue.** A section below the hero frames
+  the subscription as an ongoing supply: real resources in every
+  issue, opportunities, events and programs. Real content only.
+- **Sub-routes serve their own pages (live-verification finding).**
+  The backend's static fallback served the root homepage for every
+  extensionless sub-route (`/appointments`, `/campaigns`, …),
+  because it only served a path when it was a file — and the Next.js
+  static export (trailingSlash) puts each route in its own directory
+  with an `index.html`. Fixed in `backend/app/main.py`: a directory
+  path now serves its own `index.html`. Direct loads and in-app
+  navigation to /appointments (the real slot-booking page) now render
+  that page.
+- **HTML is no longer cached.** Plain loads of `/` were serving the
+  previous design minutes after a deploy went Live, with no GET /
+  entries in the deploy logs — a cached copy in front of the new
+  instance. Fixed in `backend/app/main.py`: HTML responses now carry
+  `Cache-Control: no-cache` (revalidate every load), so a redeploy
+  shows the new pages immediately. Hashed JS/CSS under `/_next/static`
+  keep their default caching.
+
 ## Newsletter as the core (Nov 20, 2026) — the reach reframe
 
 jem: the newsletter should be the core feature, because it sends the
 resources to students at the Cornell domain. Reframed around that: the
 newsletter is now the feature, and everything else serves it.
 
-- **Homepage leads with the newsletter.** The hero is "The Center's
-  resources, delivered to your Cornell inbox", with a subscribe box
-  right below it and what subscribers get (resources featured in every
-  issue; conference funding and deadlines — Grace Hopper, Tapia, Code
-  Afrique; events and programs). Nav puts Newsletter first, before
-  Audiences / Newsletter Issues. The `/newsletter` page is the primary
-  page, not a side page.
+- **Homepage leads with the newsletter.** The hero welcomes students
+  ("Welcome — the Center's resources and opportunities, in your
+  inbox"), with a signup prompt right in the hero and what subscribers
+  get below it (resources featured in every issue; conference funding
+  and deadlines — Grace Hopper, Tapia, Code Afrique; events and
+  programs). Nav puts Newsletter first, before Audiences / Newsletter
+  Issues. The `/newsletter` page is the primary page, not a side page.
 - **Issues are built from the real resources.** The campaign composer
   is reframed as composing a newsletter issue: staff pick resources
   from the platform's real 25 resources to feature (checkbox list with
@@ -194,7 +288,7 @@ API key with Mail Send permission and use `SMTP_USER=apikey`.
   invented (all null).
 - `backend/verify_backend.py` — stdlib-only end-to-end test suite (see
   Verification below). Run it with `python3 verify_backend.py` from
-  `backend/` using the venv. Now **111 checks** (60 from Nov 6 + 40 for
+  `backend/` using the venv. Now **112 checks** (60 from Nov 6 + 40 for
   the core, Nov 10, + 11 for the newsletter reframe, Nov 20).
 - `backend/requirements.txt` — added `python-multipart>=0.0.9` (required
   for `Form` / `UploadFile` — CSV uploads and the org-submission file
@@ -231,19 +325,22 @@ already sets `DATABASE_URL` to the compose `db` Postgres service).
 
 ## Newsletter / SMTP note
 
-There is **no mail server wired up here** — see "CORE 2" above for the
-SMTP env vars. Until they are set, issues queue as "ready to send"
-and nothing is sent.
+There is **no mail server configured on the live deploy yet** — see
+"Email confirmation" above for the sender decision and the env vars
+to set. Until they are set, issues queue as "ready to send" and
+nothing is sent, and signups use the /newsletter-only fallback link.
 
 Newsletter signup is double opt-in **and Cornell-only**: public signup
 accepts `@cornell.edu` addresses only, validated in the backend
 (`POST /api/newsletter/signup` → 400 "Use your Cornell email to
 subscribe" otherwise) and on the frontend (homepage subscribe box and
-`/newsletter` page). `POST /api/newsletter/signup` returns a
-`confirmation_token` and `confirmation_url`, which the frontend shows on
-the signup confirmation page; `GET /api/newsletter/confirm?token=…`
-confirms. Once SMTP is configured, the confirmation link can be emailed
-instead — the signup endpoint is the one place to add that send.
+`/newsletter` page). The confirmation email is the channel (see
+"Email confirmation" above): when SMTP is configured the signup
+response carries `email_sent: true` and no token, and the page shows a
+"Check your inbox" note; when it is not configured the response
+carries `email_sent: false` + the token, and the link appears on
+/newsletter only, labeled as a temporary fallback.
+`GET /api/newsletter/confirm?token=…` confirms.
 
 **Audience rule (updated Nov 10, 2026; newsletter reframe Nov 20,
 2026):** the platform now takes in org lists through the intake (CSV
@@ -286,8 +383,9 @@ Run the tests: `cd backend && .venv/bin/python verify_backend.py`
 
 - Deps install clean in a fresh venv: fastapi 0.162.0, sqlalchemy 2.1.8,
   uvicorn + psycopg2-binary (no new dependencies added).
-- `verify_backend.py`: **111/111 checks passed** (60 from Nov 6 +
-  40 for the core, Nov 10, + 11 for the newsletter reframe, Nov 20),
+- `verify_backend.py`: **112/112 checks passed** (60 from Nov 6 +
+  40 for the core, Nov 10, + 11 for the newsletter reframe, Nov 20,
+  + 1 for the email-confirmation fallback, Nov 20),
   including: auth register/login/me, role enforcement (403s for students,
   401s when unauthenticated, admin promotion), resource list/search,
   conference seed correctness (GHC 2026 `cancelled`, never in
@@ -319,6 +417,32 @@ Run the tests: `cd backend && .venv/bin/python verify_backend.py`
   appears in staff view → cancel re-opens it; unauthenticated dashboard
   → 401; homepage serves 200 with the newsletter-first copy and the
   built bundles carry the newsletter-first strings.
+- **Homepage rework + routing fixes + email confirmation (Nov 20,
+  integrated run, fresh SQLite DB, server on port 8124, built
+  frontend served): 41/41 checks passed with no SMTP configured
+  (live-site state) and 48/48 with SMTP pointed at a local capturing
+  server.** Direct GETs of `/`, `/campaigns`, `/appointments`,
+  `/newsletter`, `/audiences`, `/org-submit` (plus trailing-slash
+  variants) each return their own route's HTML, not the homepage;
+  HTML carries `Cache-Control: no-cache`, hashed `/_next/static`
+  assets keep default caching; homepage HTML carries the welcoming
+  hero + signup prompt and no confirmation link/box (those strings
+  live in the newsletter page's JS chunk only; the homepage chunk
+  carries the "You're almost in" note + the sessionStorage handoff).
+  SMTP mode: signup with name + `@cornell.edu` sends exactly one
+  confirmation email ("Hi [Name],", the newsletter, what they'll get,
+  the confirm link with a valid token, from `SMTP_FROM`); the
+  response carries `email_sent: true` and no token; clicking the
+  emailed link confirms the subscription; the campaign send actually
+  sends. No-SMTP mode: signup returns `email_sent: false` + the
+  fallback token, and the campaign send queues as "ready to send",
+  never sent. Both modes: non-Cornell rejected, issue preview with 2
+  featured resources + recipient count, slot booking end to end,
+  unauthenticated dashboard → 401. **Real bug found by the SMTP run:**
+  the first confirmation email came out quoted-printable, which folds
+  long lines at 76 chars and split the confirmation URL mid-token —
+  the email is now plain ASCII with `cte="7bit"` so the URL goes out
+  whole (see "Email confirmation" above).
 - Frontend static export verified (Nov 20): `npm run build` succeeds
   with `output: "export"` — **15 static pages** (home + 12 content
   pages + login/register + 404), no errors; all content pages serve

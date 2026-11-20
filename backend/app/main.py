@@ -337,10 +337,10 @@ def create_event(
 # The newsletter is the CORE feature: it is how the Center's resources
 # reach students at the Cornell domain. Public signup accepts Cornell
 # addresses ONLY (@cornell.edu, validated here and on the frontend).
-# Double opt-in. NOTE: there is no mail server wired up here, so the
-# confirmation link is returned in the signup response and shown on the
-# signup confirmation page. Wiring SendGrid / an SMTP service would let
-# the link be emailed instead (see DEPLOY_NOTES.md).
+# Double opt-in. The confirmation email is the channel: signup sends
+# it when SMTP is configured (see mail.send_confirmation_email). When
+# SMTP is not configured, the signup response carries the token for the
+# /newsletter-only fallback link instead (see DEPLOY_NOTES.md).
 
 
 def _confirmation_url(request: Request, token: str) -> str:
@@ -389,6 +389,7 @@ def newsletter_signup(
             status_code=200, content={"ok": True, "already_subscribed": True}
         )
     token = secrets.token_urlsafe(32)
+    status_code = 201
     if row is None:
         row = models.NewsletterSubscriber(
             name=payload.name.strip(),
@@ -402,29 +403,41 @@ def newsletter_signup(
         db.add(row)
         db.commit()
         db.refresh(row)
+    else:
+        # Pending (or previously unsubscribed): re-issue a fresh token.
+        row.name = payload.name.strip() or row.name
+        row.interests = json.dumps(payload.interests)
+        row.topics = json.dumps(payload.topics)
+        row.source = payload.source or row.source
+        row.status = "pending"
+        row.confirmation_token = token
+        db.commit()
+        status_code = 200
+    confirmation_url = _confirmation_url(request, token)
+    # The confirmation email is the channel: send it when SMTP is
+    # configured. When it is not configured (or sending fails), fall
+    # back to returning the link for /newsletter only — never pretend
+    # the email went out.
+    email_sent = False
+    if mail.smtp_configured():
+        try:
+            mail.send_confirmation_email(
+                email, payload.name.strip(), confirmation_url)
+            email_sent = True
+        except Exception:
+            email_sent = False
+    if email_sent:
         return JSONResponse(
-            status_code=201,
-            content={
-                "ok": True,
-                "confirmation_token": token,
-                "confirmation_url": _confirmation_url(request, token),
-            },
+            status_code=status_code,
+            content={"ok": True, "email_sent": True,
+                     "smtp_configured": True},
         )
-    # Pending (or previously unsubscribed): re-issue a fresh token.
-    row.name = payload.name.strip() or row.name
-    row.interests = json.dumps(payload.interests)
-    row.topics = json.dumps(payload.topics)
-    row.source = payload.source or row.source
-    row.status = "pending"
-    row.confirmation_token = token
-    db.commit()
     return JSONResponse(
-        status_code=200,
-        content={
-            "ok": True,
-            "confirmation_token": token,
-            "confirmation_url": _confirmation_url(request, token),
-        },
+        status_code=status_code,
+        content={"ok": True, "email_sent": False,
+                 "smtp_configured": mail.smtp_configured(),
+                 "confirmation_token": token,
+                 "confirmation_url": confirmation_url},
     )
 
 
@@ -1762,11 +1775,21 @@ def reports_summary(
 # Only active when a built frontend exists at ../frontend/out. API routes
 # above always win; anything else serves the built file or index.html.
 
+def _serve_file(path: Path) -> FileResponse:
+    # HTML is the app shell: never let a browser or edge cache serve a
+    # stale copy after a redeploy — the browser must revalidate every
+    # load, so the new pages show immediately. Hashed JS/CSS under
+    # /_next/static keep their default caching.
+    if path.suffix == ".html":
+        return FileResponse(path, headers={"Cache-Control": "no-cache"})
+    return FileResponse(path)
+
+
 if FRONTEND_DIR.is_dir():
 
     @app.get("/")
     def serve_index():
-        return FileResponse(FRONTEND_DIR / "index.html")
+        return _serve_file(FRONTEND_DIR / "index.html")
 
     @app.get("/{full_path:path}")
     def serve_frontend(full_path: str):
@@ -1774,5 +1797,13 @@ if FRONTEND_DIR.is_dir():
             raise HTTPException(status_code=404, detail="Not found")
         candidate = FRONTEND_DIR / full_path
         if candidate.is_file():
-            return FileResponse(candidate)
-        return FileResponse(FRONTEND_DIR / "index.html")
+            return _serve_file(candidate)
+        # Next.js static export (trailingSlash) puts each route in its
+        # own directory with an index.html — /appointments must serve
+        # appointments/index.html, not the root homepage. Without this
+        # every extensionless sub-route fell through to the homepage.
+        if candidate.is_dir():
+            index = candidate / "index.html"
+            if index.is_file():
+                return _serve_file(index)
+        return _serve_file(FRONTEND_DIR / "index.html")

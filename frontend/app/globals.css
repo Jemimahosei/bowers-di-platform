@@ -115,6 +115,48 @@ h3 {
   max-width: 680px;
 }
 
+.hero-signup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 1.25rem;
+  max-width: 680px;
+}
+
+.hero-signup input[type="email"] {
+  flex: 1;
+  min-width: 240px;
+}
+
+.hero .fine {
+  color: #d9d9e6;
+  font-size: 0.9rem;
+  flex-basis: 100%;
+}
+
+.hero-note {
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  max-width: 680px;
+}
+
+.hero-note a {
+  color: #ffd27a;
+  font-weight: 600;
+}
+
+.hero-error {
+  background: #fdecea;
+  border: 1px solid #f0b8b2;
+  color: #5f0f0f;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  max-width: 680px;
+}
+
 .container {
   max-width: 1020px;
   margin: 0 auto;

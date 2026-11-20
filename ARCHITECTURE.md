@@ -24,7 +24,7 @@ flowchart TB
     S -->|HTTPS| FE
     A -->|HTTPS| FE
     A -.->|staff login, Bearer token| API
-    SMTP[SMTP / SendGrid<br/>NOT wired up yet] -.->|future: emailed<br/>confirmations| API
+    SMTP[SMTP / Gmail<br/>sends confirmation<br/>+ campaign emails] -.->|sends| API
 ```
 
 ASCII version (same boxes and arrows):
@@ -42,9 +42,10 @@ ASCII version (same boxes and arrows):
   │        ▼                                        │
   │  FastAPI (uvicorn) ──SQLAlchemy──► SQLite file  │
   │        │                             (or        │
-  │        └─ future ──► SMTP/SendGrid  Postgres    │
-  │                       (not wired)   via         │
-  │                                     DATABASE_URL)│
+  │        └─ sends ──► SMTP (Gmail)     Postgres    │
+  │                       (env vars —    via         │
+  │                       see DEPLOY_    DATABASE_URL)│
+  │                       NOTES.md)                 │
   └─────────────────────────────────────────────────┘
 ```
 
@@ -56,7 +57,7 @@ ASCII version (same boxes and arrows):
 | **Backend** — FastAPI + SQLAlchemy, Python 3.12 | One process serves the API (`/api/*`) and the built frontend (SPA fallback for non-`/api` paths). Endpoints: health, auth, resources, conferences + participation, events, newsletter double opt-in, appointments, outreach, dashboard, reports summary. | The chat's settled stack (FastAPI + PostgreSQL). FastAPI's validation and OpenAPI docs fit a small staff tool; SQLAlchemy keeps the Postgres/SQLite switch to one env var. |
 | **Database** — SQLite by default, Postgres when `DATABASE_URL` is set | Tables: users, session tokens, resources, conferences, conference participation, events, newsletter subscribers, appointments, outreach entries. | SQLite is zero-setup for local verification and for the free Render deploy (Render allows one free Postgres per workspace and it is already used by another project). Postgres is the production shape; the same models run on both. For persistent multi-user data, set `DATABASE_URL` to a Neon Postgres URL. Container SQLite storage is ephemeral. |
 | **Auth** — stdlib only | Passwords: `hashlib.pbkdf2_hmac` + per-user salt. Sessions: `secrets.token_urlsafe` tokens in the DB, 7-day expiry, Bearer header. Roles: student / faculty / admin. Registration always creates `student`; an admin promotes roles. | No extra dependencies, no secrets in code, and the role model matches the chat's multi-role requirement while the login method (NetID/SSO vs email) is still an open question. |
-| **Newsletter** — double opt-in, no SMTP yet | Signup returns a confirmation token + URL, shown on the confirmation page; confirm endpoint activates the subscriber; unsubscribe by email. | There is no mail server in this environment. Showing the link keeps the flow testable end-to-end today; wiring SendGrid/SMTP is a one-endpoint change (see DEPLOY_NOTES.md). Audience is opt-in only by design — no org-roster imports without permission. |
+| **Newsletter** — double opt-in, email confirmation | Signup sends a confirmation email with the link when SMTP is configured ("Check your inbox" note on the page); when it is not configured, the link appears on /newsletter only, labeled as a temporary fallback. Confirm endpoint activates the subscriber; unsubscribe by email. | The confirmation email is the channel — no on-page link when mail is configured. Sender is `writesaifreewalter@gmail.com` via Gmail SMTP (env vars in Render; app password never in any file — see DEPLOY_NOTES.md). Audience is opt-in only by design — no org-roster imports without permission. |
 | **Dashboard / reporting** — computed, never fabricated | Totals, participation by conference, outreach by month, subscriber growth, appointments by status — all aggregated from real DB rows. Charts are hand-rolled SVG (no chart dependency). | The chat requires participation-trend charts and leadership reporting. Charting only real rows means an empty dashboard is honest: participation is tracked going forward only. |
 
 ## Data model
@@ -105,8 +106,10 @@ Bowers pages or jem's own words in `REAL-SPEC.md`.
 - **More data:** participation, subscribers, and appointments are plain
   rows; dashboard aggregations are simple GROUP BYs. If they ever get
   slow, add indexes on the foreign keys and pre-aggregate monthly counts.
-- **Real email:** add an SMTP/SendGrid send in the newsletter signup
-  endpoint; the token flow already exists.
+- **Real email:** done (Nov 20, 2026) — the newsletter signup sends
+  the confirmation email via SMTP, and campaigns send via the same
+  mailer. Remaining: set the SMTP env vars in the Render dashboard
+  (see DEPLOY_NOTES.md).
 - **Real login:** replace the email/password + role-promotion flow with
   Cornell NetID/SSO or an email allowlist when the Center decides (open
   question — see DEPLOY_NOTES.md).

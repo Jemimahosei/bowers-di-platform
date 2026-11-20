@@ -173,11 +173,22 @@ frontend/
 - **The newsletter is the core feature (Nov 20, 2026).** jem: the
   newsletter should be the core because it sends the resources to
   students at the Cornell domain. So the homepage leads with it (hero:
-  "The Center's resources, delivered to your Cornell inbox", subscribe
-  box, what subscribers get), nav puts Newsletter first, and the
-  campaign composer is reframed as composing a newsletter issue: staff
-  pick resources from the platform's real resource list to feature,
-  write the message, and send to subscribers and/or an audience. Public
+  "Welcome — the Center's resources and opportunities, in your
+  inbox", signup prompt in the hero, what subscribers get below it),
+  nav puts Newsletter first, and the campaign composer is reframed as
+  composing a newsletter issue: staff pick resources from the
+  platform's real resource list to feature, write the message, and
+  send to subscribers and/or an audience. Confirmation arrives by
+  email: signup sends a confirmation email addressed by name with
+  the confirm link (the channel — no on-page link when SMTP is
+  configured); when no mail server is configured, the link appears
+  on /newsletter only, labeled as a temporary fallback, and the
+  homepage shows just a short note. Emails send from
+  `writesaifreewalter@gmail.com` (SMTP_USER and SMTP_FROM) via
+  Gmail SMTP — the app password is set in the Render dashboard, never
+  in any file. Sub-routes serve their own pages (not the homepage
+  fallback) and HTML is served no-cache so a redeploy shows
+  immediately. Public
   signup accepts `@cornell.edu` addresses only, validated backend and
   frontend ("Use your Cornell email to subscribe"); double opt-in
   stays. Staff-imported org contacts are vetted by staff, not
@@ -228,11 +239,10 @@ frontend/
   `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` (Gmail app password
   or SendGrid — see `DEPLOY_NOTES.md`). While those are unset, a send
   saves the campaign as "ready to send" (`status=queued`) with its full
-  content and recipient list visible. Newsletter confirmation links are
-  shown on the signup confirmation page instead of emailed, because no
-  SMTP service is wired up. The double opt-in token flow already exists,
-  so adding SendGrid/SMTP is a one-endpoint change. Nothing is faked as
-  "sent".
+  content and recipient list visible. Newsletter signup sends a
+  confirmation email when SMTP is configured; while it is unset, the
+  confirmation link appears on /newsletter only, labeled as a
+  temporary fallback. Nothing is faked as "sent".
 - **SQLite default, Postgres escape hatch.** SQLite keeps local
   verification and the free deploy zero-setup; the same models run on
   Postgres via `DATABASE_URL`, which is the production shape. The

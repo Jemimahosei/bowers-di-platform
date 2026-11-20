@@ -45,25 +45,52 @@ export default function NewsletterPage() {
   const [topics, setTopics] = useState<string[]>([]);
   const [signupResult, setSignupResult] = useState<{
     already?: boolean;
+    email_sent?: boolean;
+    smtp_configured?: boolean;
     token?: string;
     url?: string;
     email?: string;
   } | null>(null);
+  const [inboxEmail, setInboxEmail] = useState("");
   const [confirmState, setConfirmState] = useState("");
   const [error, setError] = useState("");
   const [unsubEmail, setUnsubEmail] = useState("");
   const [unsubResult, setUnsubResult] = useState("");
 
   // If the page is opened with ?token=..., confirm that subscription.
+  // Otherwise, a signup on the homepage hands its confirmation step
+  // over here via sessionStorage — show the confirm box for it.
   useEffect(() => {
     const token = new URLSearchParams(window.location.search).get("token");
-    if (!token) return;
-    api
-      .newsletterConfirm(token)
-      .then((r) => setConfirmState(`Subscription confirmed for ${r.email}.`))
-      .catch(() =>
-        setConfirmState("That confirmation link did not work. Try signing up again.")
-      );
+    if (token) {
+      api
+        .newsletterConfirm(token)
+        .then((r) => setConfirmState(`Subscription confirmed for ${r.email}.`))
+        .catch(() =>
+          setConfirmState("That confirmation link did not work. Try signing up again.")
+        );
+      window.sessionStorage.removeItem("bowers-pending-confirmation");
+      return;
+    }
+    try {
+      const raw = window.sessionStorage.getItem("bowers-pending-confirmation");
+      if (!raw) return;
+      const pending = JSON.parse(raw);
+      if (pending?.email_sent && pending?.email) {
+        // The confirmation email went out — show the inbox note, no link.
+        setInboxEmail(pending.email);
+      } else if (pending?.token && pending?.email) {
+        setSignupResult({
+          email_sent: pending.email_sent,
+          smtp_configured: pending.smtp_configured,
+          token: pending.token,
+          url: pending.url,
+          email: pending.email,
+        });
+      }
+    } catch {
+      // Malformed stored data — ignore it; the signup form still works.
+    }
   }, []);
 
   async function submitSignup(e: React.FormEvent) {
@@ -82,12 +109,21 @@ export default function NewsletterPage() {
         topics,
         source: form.source,
       });
-      setSignupResult({
-        already: res.already_subscribed,
-        token: res.confirmation_token,
-        url: res.confirmation_url,
-        email: form.email,
-      });
+      if (res.email_sent) {
+        // The confirmation email is the channel — show the inbox note,
+        // never the link.
+        setInboxEmail(form.email);
+        setSignupResult(null);
+      } else {
+        setSignupResult({
+          already: res.already_subscribed,
+          email_sent: res.email_sent,
+          smtp_configured: res.smtp_configured,
+          token: res.confirmation_token,
+          url: res.confirmation_url,
+          email: form.email,
+        });
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
       // The API error body carries the detail, e.g.
@@ -113,6 +149,8 @@ export default function NewsletterPage() {
     try {
       const r = await api.newsletterConfirm(signupResult.token);
       setConfirmState(`Subscription confirmed for ${r.email}.`);
+      setInboxEmail("");
+      window.sessionStorage.removeItem("bowers-pending-confirmation");
     } catch {
       setError("Confirmation failed. Try the link again.");
     }
@@ -164,7 +202,12 @@ export default function NewsletterPage() {
       {confirmState && <p className="success">{confirmState}</p>}
       {error && <p className="error">{error}</p>}
 
-      {signupResult && !confirmState ? (
+      {inboxEmail && !confirmState ? (
+        <p className="notice">
+          Check your inbox — we sent a confirmation email to {inboxEmail}.
+          If you don&apos;t see it, check your spam folder.
+        </p>
+      ) : signupResult && !confirmState ? (
         <div className="confirm-box">
           <h3 style={{ marginTop: 0 }}>
             {signupResult.already
@@ -174,10 +217,9 @@ export default function NewsletterPage() {
           {!signupResult.already && (
             <>
               <p>
-                No mail server is wired up yet, so your confirmation link is
-                shown here instead of being emailed to you. Click the button
-                below (or open the link) to confirm your subscription for{" "}
-                {signupResult.email}.
+                {signupResult.smtp_configured
+                  ? `We couldn't send the confirmation email — use the link below to confirm your subscription for ${signupResult.email}.`
+                  : `No mail server is connected yet, so your confirmation link is shown here — once the Center connects its email account, this will arrive by email instead. Click the button below (or open the link) to confirm your subscription for ${signupResult.email}.`}
               </p>
               {signupResult.url && (
                 <p>
@@ -193,7 +235,8 @@ export default function NewsletterPage() {
           </p>
         </div>
       ) : (
-        !confirmState && (
+        !confirmState &&
+        !inboxEmail && (
           <form className="form" onSubmit={submitSignup}>
             <h3 style={{ margin: 0 }}>Sign up for the newsletter</h3>
             <label>

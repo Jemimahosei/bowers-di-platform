@@ -279,6 +279,11 @@ def main():
               and body.get("confirmation_url", "").endswith(
                   body.get("confirmation_token", "")),
               f"status={status} body={body}")
+        check("signup with no SMTP -> email_sent False, fallback token returned",
+              body.get("email_sent") is False
+              and body.get("smtp_configured") is False
+              and body.get("confirmation_token"),
+              f"body={body}")
         core_token = body.get("confirmation_token")
         status, body = req("GET",
                            f"/api/newsletter/confirm?token={core_token}")

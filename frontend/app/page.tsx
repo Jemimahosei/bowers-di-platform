@@ -23,16 +23,16 @@ export default function Home() {
   const [featured, setFeatured] = useState<Conference | null>(null);
   const [openSlots, setOpenSlots] = useState<Slot[] | null>(null);
   const [error, setError] = useState("");
-  const [subName, setSubName] = useState("");
   const [subEmail, setSubEmail] = useState("");
   const [subError, setSubError] = useState("");
   const [subResult, setSubResult] = useState<{
     already?: boolean;
+    email_sent?: boolean;
+    smtp_configured?: boolean;
     token?: string;
     url?: string;
     email?: string;
   } | null>(null);
-  const [subConfirmed, setSubConfirmed] = useState("");
 
   useEffect(() => {
     api
@@ -61,18 +61,36 @@ export default function Home() {
     }
     try {
       const res = await api.newsletterSignup({
-        name: subName,
+        name: "",
         email: subEmail,
         interests: [],
         topics: [],
         source: "website",
       });
-      setSubResult({
+      const result = {
         already: res.already_subscribed,
+        email_sent: res.email_sent,
+        smtp_configured: res.smtp_configured,
         token: res.confirmation_token,
         url: res.confirmation_url,
         email: subEmail,
-      });
+      };
+      setSubResult(result);
+      // No link is ever shown on the homepage. When the confirmation
+      // email did not go out, the confirmation step lives on
+      // /newsletter — hand the token over via sessionStorage so that
+      // page can show the fallback link.
+      if (!result.already && !result.email_sent && result.token) {
+        try {
+          window.sessionStorage.setItem(
+            "bowers-pending-confirmation",
+            JSON.stringify(result)
+          );
+        } catch {
+          // Storage unavailable — signing up again on /newsletter
+          // issues a fresh token, so the step still works.
+        }
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
       setSubError(
@@ -83,105 +101,95 @@ export default function Home() {
     }
   }
 
-  async function confirmSubscribe() {
-    if (!subResult?.token) return;
-    setSubError("");
-    try {
-      const r = await api.newsletterConfirm(subResult.token);
-      setSubConfirmed(`Subscribed — ${r.email} will get the next issue.`);
-    } catch {
-      setSubError("Confirmation failed. Try the link again.");
-    }
-  }
-
   return (
     <>
       <div className="hero">
         <div className="hero-inner">
-          <h1>The Center&apos;s resources, delivered to your Cornell inbox.</h1>
+          <h1>
+            Welcome — the Center&apos;s resources and opportunities, in
+            your inbox.
+          </h1>
           <p className="attribution">
             “You belong here.” — Hakim Weatherspoon, Associate Dean for
             Belonging
           </p>
           <p>
-            The Center for Belonging&apos;s newsletter is how the
-            Center&apos;s resources reach students — each issue features
-            real resources from the Center, plus conference funding and
-            deadlines and upcoming events, sent to your @cornell.edu
-            address.
+            You&apos;re in the right place. Sign up once with your
+            Cornell email, and every issue brings you a steady supply of
+            what the Center has for you — real resources, plus
+            opportunities: conference funding and deadlines, scholarships
+            and paid opportunities, events and programs. It keeps coming,
+            so you don&apos;t have to go looking for it.
           </p>
+          {subError && <p className="hero-error">{subError}</p>}
+          {subResult?.email_sent ? (
+            <p className="hero-note">
+              Check your inbox — we sent a confirmation email to{" "}
+              {subResult.email}. If you don&apos;t see it, check your
+              spam folder.
+            </p>
+          ) : subResult?.already ? (
+            <p className="hero-note">
+              You&apos;re already subscribed — the next issue is on its
+              way to your Cornell inbox.
+            </p>
+          ) : subResult ? (
+            <p className="hero-note">
+              You&apos;re almost in —{" "}
+              <Link href="/newsletter">
+                head to the newsletter page to confirm your subscription
+              </Link>
+              .
+            </p>
+          ) : (
+            <form className="hero-signup" onSubmit={submitSubscribe}>
+              <input
+                type="email"
+                required
+                value={subEmail}
+                onChange={(e) => setSubEmail(e.target.value)}
+                placeholder="netid@cornell.edu"
+                aria-label="Cornell email"
+              />
+              <button type="submit">Sign up</button>
+              <span className="fine">
+                Cornell email only — use your @cornell.edu address.
+              </span>
+            </form>
+          )}
         </div>
       </div>
       <div className="container">
         {error && <p className="error">{error}</p>}
 
-        <div className="card">
-          <h2 style={{ marginTop: 0 }}>Get the newsletter</h2>
-          <p className="lede">
-            What subscribers get: the Center&apos;s resources, featured in
-            every issue; conference funding and deadlines (Grace Hopper,
-            Tapia, Code Afrique); and events and programs from the
-            Center. Cornell email only — use your @cornell.edu address.
-          </p>
-          {subConfirmed && <p className="success">{subConfirmed}</p>}
-          {subError && <p className="error">{subError}</p>}
-          {subResult && !subConfirmed ? (
-            <div className="confirm-box">
-              <h3 style={{ marginTop: 0 }}>
-                {subResult.already
-                  ? "You are already subscribed"
-                  : "One more step — confirm your subscription"}
-              </h3>
-              {!subResult.already && (
-                <>
-                  <p>
-                    No mail server is wired up yet, so your confirmation
-                    link is shown here instead of being emailed to you.
-                    Click the button below (or open the link) to confirm
-                    your subscription for {subResult.email}.
-                  </p>
-                  {subResult.url && (
-                    <p>
-                      Confirmation link:{" "}
-                      <a href={subResult.url}>{subResult.url}</a>
-                    </p>
-                  )}
-                  <button onClick={confirmSubscribe}>
-                    Confirm my subscription
-                  </button>
-                </>
-              )}
-              <p>Every email includes a one-click unsubscribe link.</p>
-            </div>
-          ) : (
-            !subConfirmed && (
-              <form className="form" onSubmit={submitSubscribe}>
-                <label>
-                  Name
-                  <input
-                    required
-                    value={subName}
-                    onChange={(e) => setSubName(e.target.value)}
-                  />
-                </label>
-                <label>
-                  Cornell email
-                  <input
-                    type="email"
-                    required
-                    value={subEmail}
-                    onChange={(e) => setSubEmail(e.target.value)}
-                    placeholder="netid@cornell.edu"
-                  />
-                  <span>Cornell email only — use your @cornell.edu address.</span>
-                </label>
-                <button type="submit">Subscribe</button>
-              </form>
-            )
-          )}
-          <p>
-            <Link href="/newsletter">More about the newsletter →</Link>
-          </p>
+        <h2>What you&apos;ll get, every issue</h2>
+        <p className="lede">
+          Sign up once and it keeps coming — every issue brings you a
+          fresh supply of what the Center has for you.
+        </p>
+        <div className="grid">
+          <div className="card">
+            <h3>Real resources</h3>
+            <p>
+              The Center&apos;s office services, community resources, and
+              campus partners — picked for that issue, with links so you
+              can use them right away.
+            </p>
+          </div>
+          <div className="card">
+            <h3>Opportunities</h3>
+            <p>
+              Conference funding and deadlines (Grace Hopper, Tapia,
+              Code Afrique), scholarships and paid opportunities — what
+              to apply for, and by when.
+            </p>
+          </div>
+          <div className="card">
+            <h3>Events and programs</h3>
+            <p>
+              What the Center is running — and how to take part.
+            </p>
+          </div>
         </div>
 
         <h2>How the Center reaches you</h2>
