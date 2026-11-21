@@ -130,7 +130,7 @@ export default function CampaignsPage() {
     setNotice("");
     try {
       const result = await api.sendCampaign(selected.id);
-      if (result.smtp_configured === false) {
+      if (result.email_configured === false) {
         setNotice(
           "No email server is configured, so this issue is saved as ready to send — nothing was sent. " +
             (result.message ?? "")
@@ -332,9 +332,9 @@ export default function CampaignsPage() {
           {selected.status === "queued" && (
             <p className="notice">
               <strong>Ready to send — nothing has been sent yet.</strong>{" "}
-              No email server is configured. Set SMTP_HOST, SMTP_PORT,
-              SMTP_USER, SMTP_PASS, and SMTP_FROM in the Render dashboard
-              (a Gmail app password or SendGrid works), then send again.
+              No email server is configured. Set RESEND_API_KEY and
+              RESEND_FROM in the Render dashboard (see DEPLOY_NOTES.md),
+              then send again.
             </p>
           )}
           <p style={{ whiteSpace: "pre-wrap" }}>{selected.body}</p>

@@ -129,6 +129,10 @@ def main():
         check("health", up)
         if not up:
             return 1
+        check("health reports email_mode console, no last error",
+              body.get("email_mode") == "console"
+              and body.get("last_email_error") == "",
+              f"body={body}")
 
         # ---- Seed correctness ----
         status, resources = req("GET", "/api/resources")
@@ -279,9 +283,9 @@ def main():
               and body.get("confirmation_url", "").endswith(
                   body.get("confirmation_token", "")),
               f"status={status} body={body}")
-        check("signup with no SMTP -> email_sent False, fallback token returned",
+        check("signup with no email configured -> email_sent False, fallback token returned",
               body.get("email_sent") is False
-              and body.get("smtp_configured") is False
+              and body.get("email_configured") is False
               and body.get("confirmation_token"),
               f"body={body}")
         core_token = body.get("confirmation_token")
@@ -508,9 +512,9 @@ def main():
               f"status={status} body={body}")
         status, body = req("POST", f"/api/campaigns/{campaign_id}/send",
                            {}, token=admin_token)
-        check("send with no SMTP -> queued, never claimed sent",
+        check("send with no email configured -> queued, never claimed sent",
               status == 200 and body.get("status") == "queued"
-              and body.get("smtp_configured") is False
+              and body.get("email_configured") is False
               and body.get("recipient_count") == 1,
               f"status={status} body={body}")
         status, body = req("GET", f"/api/campaigns/{campaign_id}",
@@ -559,9 +563,9 @@ def main():
               status == 404, f"status={status}")
         status, body = req("POST", f"/api/campaigns/{issue_id}/send",
                            {}, token=admin_token)
-        check("issue send with no SMTP -> queued, never claimed sent",
+        check("issue send with no email configured -> queued, never claimed sent",
               status == 200 and body.get("status") == "queued"
-              and body.get("smtp_configured") is False
+              and body.get("email_configured") is False
               and body.get("recipient_count") == 3
               and len(body.get("featured_resources", [])) == 2,
               f"status={status} body={body}")

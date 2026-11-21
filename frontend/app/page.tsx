@@ -28,7 +28,7 @@ export default function Home() {
   const [subResult, setSubResult] = useState<{
     already?: boolean;
     email_sent?: boolean;
-    smtp_configured?: boolean;
+    email_configured?: boolean;
     token?: string;
     url?: string;
     email?: string;
@@ -70,7 +70,7 @@ export default function Home() {
       const result = {
         already: res.already_subscribed,
         email_sent: res.email_sent,
-        smtp_configured: res.smtp_configured,
+        email_configured: res.email_configured,
         token: res.confirmation_token,
         url: res.confirmation_url,
         email: subEmail,

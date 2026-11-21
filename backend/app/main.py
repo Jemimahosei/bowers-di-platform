@@ -88,7 +88,8 @@ def _user_out(user: models.User) -> dict:
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "email_mode": mail.email_mode(),
+            "last_email_error": mail.last_error()}
 
 
 # --------------------------------- Auth ----------------------------------
@@ -338,8 +339,8 @@ def create_event(
 # reach students at the Cornell domain. Public signup accepts Cornell
 # addresses ONLY (@cornell.edu, validated here and on the frontend).
 # Double opt-in. The confirmation email is the channel: signup sends
-# it when SMTP is configured (see mail.send_confirmation_email). When
-# SMTP is not configured, the signup response carries the token for the
+# it when email is configured (see mail.send_confirmation_email). When
+# no email sender is configured, the signup response carries the token for the
 # /newsletter-only fallback link instead (see DEPLOY_NOTES.md).
 
 
@@ -414,12 +415,12 @@ def newsletter_signup(
         db.commit()
         status_code = 200
     confirmation_url = _confirmation_url(request, token)
-    # The confirmation email is the channel: send it when SMTP is
+    # The confirmation email is the channel: send it when email is
     # configured. When it is not configured (or sending fails), fall
     # back to returning the link for /newsletter only — never pretend
     # the email went out.
     email_sent = False
-    if mail.smtp_configured():
+    if mail.email_configured():
         try:
             mail.send_confirmation_email(
                 email, payload.name.strip(), confirmation_url)
@@ -430,12 +431,12 @@ def newsletter_signup(
         return JSONResponse(
             status_code=status_code,
             content={"ok": True, "email_sent": True,
-                     "smtp_configured": True},
+                     "email_configured": True},
         )
     return JSONResponse(
         status_code=status_code,
         content={"ok": True, "email_sent": False,
-                 "smtp_configured": mail.smtp_configured(),
+                 "email_configured": mail.email_configured(),
                  "confirmation_token": token,
                  "confirmation_url": confirmation_url},
     )
@@ -1243,8 +1244,9 @@ def review_org_submission(
 # feature in it; sending goes to confirmed newsletter subscribers
 # and/or an audience segment. Preview renders the issue with the chosen
 # resources and the exact recipient count (opted-out excluded).
-# Sending needs SMTP (SMTP_HOST/PORT/USER/PASS/FROM); without it the
-# campaign is saved as "ready to send" (status "queued") with content +
+# Sending needs an email sender (Resend via RESEND_API_KEY, or SMTP
+# via SMTP_HOST/PORT/USER/PASS/FROM); without one the campaign is
+# saved as "ready to send" (status "queued") with content +
 # recipients visible — never claimed sent.
 
 
@@ -1546,18 +1548,17 @@ def send_campaign(
                 )
             )
     db.commit()
-    if not mail.smtp_configured():
-        # No mail server: the campaign is ready to send, with content and
+    if not mail.email_configured():
+        # No email sender: the campaign is ready to send, with content and
         # recipients visible — but nothing is claimed sent.
         row.status = "queued"
         db.commit()
         db.refresh(row)
         return {
             **_campaign_out(row, db),
-            "smtp_configured": False,
-            "message": "No SMTP configured — campaign saved as ready to send. "
-            "Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, and SMTP_FROM "
-            "to send (see DEPLOY_NOTES.md).",
+            "email_configured": False,
+            "message": "No email configured — campaign saved as ready to send. "
+            "Set RESEND_API_KEY and RESEND_FROM to send (see DEPLOY_NOTES.md).",
         }
     base = (os.environ.get("FRONTEND_URL") or str(request.base_url)).rstrip("/")
     unsubscribe_url = f"{base}/newsletter"
@@ -1594,7 +1595,7 @@ def send_campaign(
     db.refresh(row)
     return {
         **_campaign_out(row, db),
-        "smtp_configured": True,
+        "email_configured": True,
         "sent": sent,
         "failed": failed,
     }

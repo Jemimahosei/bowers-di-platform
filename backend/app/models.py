@@ -236,7 +236,7 @@ class Campaign(Base):
     newsletter subscribers and/or the selected audiences.
 
     ``status`` is one of: draft | queued | sent | partially_sent.
-    "queued" means ready to send but no SMTP is configured — the content
+    "queued" means ready to send but no email sender is configured — the content
     and recipient list are visible, and nothing is claimed sent.
     ``audience_ids`` / ``org_filter`` / ``interest_filter`` define the
     segment; ``include_self_signup`` also pulls in confirmed opt-in

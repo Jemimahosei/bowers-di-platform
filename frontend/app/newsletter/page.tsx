@@ -46,7 +46,7 @@ export default function NewsletterPage() {
   const [signupResult, setSignupResult] = useState<{
     already?: boolean;
     email_sent?: boolean;
-    smtp_configured?: boolean;
+    email_configured?: boolean;
     token?: string;
     url?: string;
     email?: string;
@@ -82,7 +82,7 @@ export default function NewsletterPage() {
       } else if (pending?.token && pending?.email) {
         setSignupResult({
           email_sent: pending.email_sent,
-          smtp_configured: pending.smtp_configured,
+          email_configured: pending.email_configured,
           token: pending.token,
           url: pending.url,
           email: pending.email,
@@ -118,7 +118,7 @@ export default function NewsletterPage() {
         setSignupResult({
           already: res.already_subscribed,
           email_sent: res.email_sent,
-          smtp_configured: res.smtp_configured,
+          email_configured: res.email_configured,
           token: res.confirmation_token,
           url: res.confirmation_url,
           email: form.email,
@@ -217,7 +217,7 @@ export default function NewsletterPage() {
           {!signupResult.already && (
             <>
               <p>
-                {signupResult.smtp_configured
+                {signupResult.email_configured
                   ? `We couldn't send the confirmation email — use the link below to confirm your subscription for ${signupResult.email}.`
                   : `No mail server is connected yet, so your confirmation link is shown here — once the Center connects its email account, this will arrive by email instead. Click the button below (or open the link) to confirm your subscription for ${signupResult.email}.`}
               </p>

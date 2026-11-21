@@ -3,6 +3,44 @@
 Backend rebuilt Nov 6, 2026 to the real spec (`REAL-SPEC.md`). Nothing was
 pushed; no live service was touched.
 
+## Email sending via Resend (Nov 21, 2026) — the newsletter actually sends
+
+SMTP cannot work on Render's free tier: Render blocks outbound SMTP
+ports (25/465/587), so a Gmail app password or SendGrid SMTP can never
+send from the live deploy (proven on braidedU the same day — its Gmail
+SMTP failed "Network is unreachable" on Render). The sender is now
+Resend, over plain HTTPS — the same setup already delivering for
+braidedU.
+
+- **Senders, in priority order** (`backend/app/mail.py`): SMTP when
+  fully configured (`SMTP_HOST` + `SMTP_USER` + `SMTP_PASS` — still
+  first, for local dev or any host that allows SMTP), else Resend when
+  `RESEND_API_KEY` is set, else nothing sends (campaigns queue as
+  "ready to send", signups fall back to the /newsletter-only link).
+  `email_configured()` / `email_mode()` (`'smtp'` | `'resend'` |
+  `'console'`) / `last_error()` report the state; `GET /api/health`
+  returns `email_mode` and `last_email_error` (never any secret).
+- **Env vars to set in the Render dashboard** (service → Environment):
+  `RESEND_API_KEY` = the Resend API key (from the Resend dashboard —
+  the same key braidedU uses), `RESEND_FROM` = the sender, default
+  `Center for Belonging <hello@jemimahosei.com>` (jemimahosei.com is
+  the domain verified in Resend). No new dependency: the Resend send
+  is stdlib `urllib` only, with a custom User-Agent — Resend sits
+  behind Cloudflare, which refuses Python's default User-Agent with
+  error 1010.
+- **The Gmail route is dead for the live deploy.** The app-password
+  plan from Nov 20 is superseded: no `SMTP_*` vars are needed on
+  Render, and the Gmail app password jem created is unused there.
+  The confirmation email body is unchanged (plain ASCII, `cte="7bit"`,
+  long URL never folded) and the senders raise on failure, so the
+  callers' contracts are unchanged — signup falls back to the
+  /newsletter-only link, campaign send records per-recipient failure.
+- **After this is pushed:** set the two vars in the Render dashboard,
+  redeploy, then send a test issue to a small audience (and sign up
+  with a Cornell address) and check the inbox before using it for
+  real outreach. A real Resend send has not been tested yet (see
+  "Not verified here" below).
+
 ## Email confirmation (Nov 20, 2026) — the confirmation email is the channel
 
 jem: when someone signs up with their name, they should receive an
@@ -10,28 +48,29 @@ email asking them to confirm their subscription. So the confirmation
 email is now the channel — not an on-page link.
 
 - **What happens on signup.** `POST /api/newsletter/signup` still
-  creates the pending subscriber and token, then — when SMTP is
+  creates the pending subscriber and token, then — when email is
   configured — sends the confirmation email (`backend/app/mail.py`:
   `send_confirmation_email`). The email is addressed by name
   ("Hi [Name]," — "Hi there," when no name was given, e.g. the
   homepage form is email-only), says they signed up for the Center
   for Belonging newsletter, carries the confirmation link, and says
   what they'll get (resources and opportunities in every issue).
-  From address = `SMTP_FROM`. The confirm endpoint and token flow are
+  From address = `RESEND_FROM` (Resend) or `SMTP_FROM` (SMTP, when
+  that is the active sender). The confirm endpoint and token flow are
   unchanged; double opt-in stays (an unconfirmed address receives
   nothing else).
 - **What the page shows.** After signup, the page shows "Check your
   inbox — we sent a confirmation email to [their Cornell address]"
   (plus a note to check spam). **No confirmation link or button on
   the homepage, ever.**
-- **Fallback only when SMTP is unset.** If sending fails because no
+- **Fallback only when no email sender is configured.** If sending fails because no
   mail server is configured, the API answers `email_sent: false` +
   the token, and the frontend shows the confirmation link on
   **/newsletter only**, clearly labeled as a temporary fallback ("No
   mail server is connected yet, so your confirmation link is shown
   here — once the Center connects its email account, this will arrive
-  by email instead"). When SMTP is configured, no on-page link
-  appears anywhere. If SMTP is configured but the send itself fails,
+  by email instead"). When email is configured, no on-page link
+  appears anywhere. If email is configured but the send itself fails,
   the same /newsletter-only link appears with a "we couldn't send
   it" label. Nothing is ever claimed sent when it was not.
 - **The URL must not fold (bug found by the test).** The first
@@ -41,16 +80,20 @@ email is now the channel — not an on-page link.
   The confirmation email is therefore plain ASCII with
   `cte="7bit"`, so the URL line goes out whole. (Campaign emails
   still use the default encoding — staff-composed content, unchanged.)
-- **Sender (decided by jem, Nov 20, 2026).** The Bowers emails send
-  from her Gmail account connected to Muse:
-  `SMTP_USER` = `writesaifreewalter@gmail.com`,
-  `SMTP_FROM` = `writesaifreewalter@gmail.com`,
-  `SMTP_HOST` = `smtp.gmail.com`, `SMTP_PORT` = `587`,
-  `SMTP_PASS` = a Gmail **app password jem generates herself** (never
-  put the actual password in any file). The env vars are set in the
-  Render dashboard → service → Environment after this rework is
-  pushed. Until they are set, signups use the /newsletter-only
-  fallback link and issues queue as "ready to send".
+- **Sender (decided by jem, Nov 20, 2026; route changed Nov 21, 2026).**
+  The Bowers emails send from her verified domain via Resend (see
+  "Email sending via Resend" above):
+  `RESEND_API_KEY` = the Resend API key,
+  `RESEND_FROM` = `Center for Belonging <hello@jemimahosei.com>`.
+  The env vars are set in the Render dashboard → service →
+  Environment after this rework is pushed. Until they are set,
+  signups use the /newsletter-only fallback link and issues queue as
+  "ready to send". The Gmail SMTP plan from Nov 20 (`SMTP_HOST` =
+  `smtp.gmail.com`, `SMTP_USER`/`SMTP_FROM` =
+  `writesaifreewalter@gmail.com`, Gmail app password) is superseded —
+  Render's free tier blocks outbound SMTP ports, so it cannot send
+  from the live deploy; SMTP stays first-priority only where a host
+  allows it (e.g. local dev).
 
 ## Welcoming homepage + routing fixes (Nov 20, 2026)
 
@@ -72,7 +115,7 @@ the homepage was showing the post-signup confirmation box. Reworked:
   the homepage, the page shows only a short note ("You're almost in —
   head to the newsletter page to confirm your subscription"). The full
   confirmation step (confirmation link + Confirm button + the honest
-  no-SMTP note) lives on /newsletter only. Same endpoint and token
+  no-email note) lives on /newsletter only. Same endpoint and token
   flow — only the placement changed. The homepage hands the token to
   /newsletter via sessionStorage (`bowers-pending-confirmation`); if
   that handoff is lost (e.g. a new tab), signing up again on
@@ -119,7 +162,7 @@ newsletter is now the feature, and everything else serves it.
   audiences — an issue can go to subscribers alone, with no audience
   picked. Campaigns are newsletter issues under the hood: same model
   and statuses (`draft` / `queued` / `sent` / `partially_sent`),
-  per-recipient status, no-SMTP → "ready to send", never falsely
+  per-recipient status, no email sender → "ready to send", never falsely
   marked sent. The sent email appends a "Featured resources" section
   (title + link + description) to the staff message.
   Backend: `Campaign.resource_ids` (JSON list of resource ids, in
@@ -202,11 +245,12 @@ Contact, OrgSubmission; `backend/app/main.py`: `/api/audiences/*`,
   include confirmed newsletter subscribers (on by default — an issue
   can go to subscribers alone), preview the exact recipient count
   (opted-out excluded) with the featured resources shown, and send.
-- Sending transport is **SMTP via env vars** (see below). When SMTP is
-  not configured, sending saves the campaign as **"ready to send"**
+- Sending transport is **Resend via env vars** (see below; SMTP first
+  when fully configured, for hosts that allow it). When no email
+  sender is configured, sending saves the campaign as **"ready to send"**
   (`status=queued`) with its full content and recipient list visible and
-  a banner explaining that sending needs SMTP credentials. **A queued
-  campaign is never shown as sent** — the status is `queued`, and the
+  a banner explaining that sending needs an email sender configured.
+  **A queued campaign is never shown as sent** — the status is `queued`, and the
   send response says so plainly.
 - Statuses: `draft` / `queued` / `sent` / `partially_sent`; per-recipient
   status (`sent` / `failed` + error) is recorded when actually sent.
@@ -214,20 +258,21 @@ Contact, OrgSubmission; `backend/app/main.py`: `/api/audiences/*`,
   appends the featured resources (title + link + description) to the
   staff message.
 
-**SMTP env vars (set in the Render dashboard → service → Environment):**
+**Resend env vars (set in the Render dashboard → service → Environment):**
 
 | Var | Example |
 | --- | --- |
-| `SMTP_HOST` | `smtp.gmail.com` or `smtp.sendgrid.net` |
-| `SMTP_PORT` | `587` (STARTTLS) or `465` (implicit TLS) |
-| `SMTP_USER` | Gmail address, or `apikey` for SendGrid |
-| `SMTP_PASS` | Gmail **app password** (not the account password), or a SendGrid API key |
-| `SMTP_FROM` | The address campaigns send from, e.g. `deib-office@bowers.cornell.edu` |
+| `RESEND_API_KEY` | The Resend API key (from the Resend dashboard — same key braidedU uses) |
+| `RESEND_FROM` | `Center for Belonging <hello@jemimahosei.com>` (jemimahosei.com is the domain verified in Resend; a bare address is wrapped with the sender name) |
 
-If any of these is unset, the mailer is off and campaigns queue instead
-of sending. For Gmail, create the app password at Google Account →
-Security → 2-Step Verification → App passwords. For SendGrid, create an
-API key with Mail Send permission and use `SMTP_USER=apikey`.
+SMTP is still supported as the first-priority sender where a host
+allows it — `SMTP_HOST`, `SMTP_PORT` (`587` STARTTLS or `465`
+implicit TLS), `SMTP_USER`, `SMTP_PASS` (a Gmail **app password**,
+not the account password, or a SendGrid API key with `SMTP_USER` =
+`apikey`), `SMTP_FROM` — but **it cannot work on Render's free tier**
+(Render blocks outbound SMTP ports 25/465/587), so on the live deploy
+Resend is the sender that works. If no sender is configured at all,
+the mailer is off and campaigns queue instead of sending.
 
 **CORE 3 — Real appointment booking with Dr. Roberts**
 (`backend/app/models.py`: AvailabilitySlot, Booking;
@@ -264,9 +309,13 @@ API key with Mail Send permission and use `SMTP_USER=apikey`.
   (deprecated — see Core 3), OutreachEntry (old shape + `channel`,
   `audience`, `subject`), plus the core models: Audience, Contact,
   OrgSubmission, Campaign, CampaignRecipient, AvailabilitySlot, Booking.
-- `app/mail.py` — stdlib-only SMTP sender (`smtplib`): port 465 =
-  implicit TLS, otherwise STARTTLS; `smtp_configured()` gate; an
-  unsubscribe footer is appended to every campaign.
+- `app/mail.py` — stdlib-only sender: SMTP via `smtplib` (port 465 =
+  implicit TLS, otherwise STARTTLS) first when fully configured, else
+  Resend via stdlib `urllib` (HTTPS POST to api.resend.com, custom
+  User-Agent); `email_configured()` / `email_mode()` / `last_error()`
+  gates and reporting; an unsubscribe footer is appended to every
+  campaign. `GET /api/health` reports `email_mode` and
+  `last_email_error`.
 - `app/auth.py` — stdlib-only auth: `hashlib.pbkdf2_hmac` passwords with a
   per-user salt, `secrets.token_urlsafe` session tokens in the DB with
   7-day expiry, Bearer auth. Roles: student, faculty, admin.
@@ -323,19 +372,19 @@ in the Render dashboard. The same code runs on both.
 `docker-compose.yml` was left as-is for local dev (its `api` service
 already sets `DATABASE_URL` to the compose `db` Postgres service).
 
-## Newsletter / SMTP note
+## Newsletter / email note
 
-There is **no mail server configured on the live deploy yet** — see
-"Email confirmation" above for the sender decision and the env vars
-to set. Until they are set, issues queue as "ready to send" and
-nothing is sent, and signups use the /newsletter-only fallback link.
+There is **no email sender configured on the live deploy yet** — see
+"Email sending via Resend" above for the vars to set. Until they are
+set, issues queue as "ready to send" and nothing is sent, and signups
+use the /newsletter-only fallback link.
 
 Newsletter signup is double opt-in **and Cornell-only**: public signup
 accepts `@cornell.edu` addresses only, validated in the backend
 (`POST /api/newsletter/signup` → 400 "Use your Cornell email to
 subscribe" otherwise) and on the frontend (homepage subscribe box and
 `/newsletter` page). The confirmation email is the channel (see
-"Email confirmation" above): when SMTP is configured the signup
+"Email confirmation" above): when email is configured the signup
 response carries `email_sent: true` and no token, and the page shows a
 "Check your inbox" note; when it is not configured the response
 carries `email_sent: false` + the token, and the link appears on
@@ -357,7 +406,7 @@ opted-out contacts are excluded from every issue.
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-# → http://127.0.0.1:8000/api/health  {"status":"ok"}
+# → http://127.0.0.1:8000/api/health  {"status": "ok", "email_mode": "console", "last_email_error": ""}
 # → demo admin: admin@center.demo / demo1234
 ```
 
@@ -499,11 +548,14 @@ Run the tests: `cd backend && .venv/bin/python verify_backend.py`
   now installs `python-multipart` via `requirements.txt` — no Dockerfile
   change was needed for the CSV upload support.
 - The Render deploy itself (nothing pushed, no service created).
-- **Real SMTP sending** — the mailer was verified only as far as the
-  no-SMTP gate (campaigns queue, never claim sent). An actual send
-  through Gmail/SendGrid has not been tested; after the first deploy,
-  set the SMTP env vars and send a test campaign to a small audience
-  before using it for real outreach.
+- **Real sending through Resend** — the mailer was verified only as
+  far as the no-sender gate (campaigns queue, never claim sent) and
+  with the HTTP call mocked (see `backend/test_mail_resend.py`). An
+  actual send through Resend has not been tested; after the first
+  deploy, set `RESEND_API_KEY` / `RESEND_FROM` and send a test
+  campaign to a small audience (and sign up with a Cornell address)
+  before using it for real outreach. SMTP sending is likewise
+  untested against a real server.
 - The rebuilt frontend pages against this API in a real browser — the
   API contract is the one the frontend uses, and the static export
   serves, but no browser click-through was done (audiences CSV upload,
@@ -524,8 +576,9 @@ Run the tests: `cd backend && .venv/bin/python verify_backend.py`
    add Dr. Roberts' availability and visitors book open slots. What
    times does she actually offer, and who adds them (her, or staff on
    her behalf)? Slots start empty until someone adds them.
-5. **Newsletter / campaign mechanics:** SMTP env vars are documented
-   above (Gmail app password or SendGrid). Who sends from which account
-   — `deib-office@bowers.cornell.edu` is the suggested sender — and
-   whether CampusGroups integration is actually available. Org rosters
-   are now handled by the intake with the org's agreement (see Core 1).
+5. **Newsletter / campaign mechanics:** Resend env vars are documented
+   above. Who sends from which account — `hello@jemimahosei.com` is
+   the sender (the verified domain); `deib-office@bowers.cornell.edu`
+   was the suggested sender under the old SMTP plan — and whether
+   CampusGroups integration is actually available. Org rosters are
+   now handled by the intake with the org's agreement (see Core 1).

@@ -66,12 +66,12 @@ export interface CenterEvent {
 export interface NewsletterSignupResponse {
   ok: boolean;
   already_subscribed?: boolean;
-  // The confirmation email is the channel: when SMTP is configured and
+  // The confirmation email is the channel: when email is configured and
   // the email went out, no token/url is returned — the page shows a
   // "check your inbox" note instead. When it did not go out, the token
   // and url come back for the /newsletter-only fallback link.
   email_sent?: boolean;
-  smtp_configured?: boolean;
+  email_configured?: boolean;
   confirmation_token?: string;
   confirmation_url?: string;
 }
@@ -157,7 +157,7 @@ export interface Campaign {
   status: "draft" | "queued" | "sent" | "partially_sent";
   recipient_count: number;
   recipients?: CampaignRecipient[];
-  smtp_configured?: boolean;
+  email_configured?: boolean;
   message?: string;
   sent?: number;
   failed?: number;
