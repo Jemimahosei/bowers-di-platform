@@ -240,12 +240,6 @@ export default function Home() {
         setMode("inbox");
       }
     } catch {
-            /* storage unavailable — /newsletter signup issues a fresh token */
-          }
-        }
-        setMode("fail");
-      }
-    } catch {
       setMode("fail");
     } finally {
       setSending(false);
