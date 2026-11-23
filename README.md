@@ -2,7 +2,7 @@
 
 ## 🔗 Live site: https://bowers-di-platform.onrender.com
 
-The working platform for the Center for Belonging at Cornell Bowers CIS (College of Computing and Information Science). Its core job is reach: getting the Center's resources to the students who need them. The newsletter is the core feature — students sign up with a Cornell email, confirm by email (double opt-in), and receive issues built from the Center's real resources, sent to subscriber and audience segments. Staff also take in audiences from student orgs (submissions stay pending review until approved) and visitors book real appointment slots with Dr. LeeAnn Roberts, Director of the DEIB office. Around that core: searchable resource discovery, conference participation tracking, programs and events, and a staff dashboard.
+The working platform for the Center for Belonging at Cornell Bowers CIS (College of Computing and Information Science). Its core job is reach: getting the Center's resources to the students who need them. The newsletter is the core feature — students sign up with a Cornell email and receive issues built from the Center's real resources, sent to subscriber and audience segments. Staff also take in audiences from student orgs (submissions stay pending review until approved) and visitors book real appointment slots with Dr. LeeAnn Roberts, Director of the DEIB office. Around that core: searchable resource discovery, conference participation tracking, programs and events, and a staff dashboard.
 
 ## Architecture
 
