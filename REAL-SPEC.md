@@ -1,4 +1,4 @@
-# Bowers D&I Platform — REAL Spec (from jem's Claude chat)
+# Open Door — REAL Spec (from jem's Claude chat)
 
 Source: `~/workspace/user/files/Claude-Application_process-20261026-1042.md`
 (the Oct 21 export is a subset of the same conversation; line numbers below are

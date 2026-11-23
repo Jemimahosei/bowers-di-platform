@@ -1,7 +1,7 @@
-"""Bowers D&I Platform API — Center for Belonging, Cornell CIS Bowers.
+"""Open Door API — Center for Belonging, Cornell CIS Bowers.
 
 FastAPI + SQLAlchemy. Postgres when DATABASE_URL is set, SQLite file
-fallback (./bowers.db) when unset.
+fallback (./opendoor.db) when unset.
 
 Auth: stdlib-only (hashlib.pbkdf2_hmac passwords, secrets.token_urlsafe
 session tokens, 7-day expiry, Bearer auth). Roles: student, faculty,
@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Bowers D&I Platform API", lifespan=lifespan)
+app = FastAPI(title="Open Door API", lifespan=lifespan)
 
 _origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
 _frontend_url = os.environ.get("FRONTEND_URL")

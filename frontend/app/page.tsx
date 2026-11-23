@@ -83,7 +83,7 @@ export default function Home() {
       if (!result.already && !result.email_sent && result.token) {
         try {
           window.sessionStorage.setItem(
-            "bowers-pending-confirmation",
+            "opendoor-pending-confirmation",
             JSON.stringify(result)
           );
         } catch {

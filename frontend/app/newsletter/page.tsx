@@ -69,11 +69,11 @@ export default function NewsletterPage() {
         .catch(() =>
           setConfirmState("That confirmation link did not work. Try signing up again.")
         );
-      window.sessionStorage.removeItem("bowers-pending-confirmation");
+      window.sessionStorage.removeItem("opendoor-pending-confirmation");
       return;
     }
     try {
-      const raw = window.sessionStorage.getItem("bowers-pending-confirmation");
+      const raw = window.sessionStorage.getItem("opendoor-pending-confirmation");
       if (!raw) return;
       const pending = JSON.parse(raw);
       if (pending?.email_sent && pending?.email) {
@@ -150,7 +150,7 @@ export default function NewsletterPage() {
       const r = await api.newsletterConfirm(signupResult.token);
       setConfirmState(`Subscription confirmed for ${r.email}.`);
       setInboxEmail("");
-      window.sessionStorage.removeItem("bowers-pending-confirmation");
+      window.sessionStorage.removeItem("opendoor-pending-confirmation");
     } catch {
       setError("Confirmation failed. Try the link again.");
     }

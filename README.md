@@ -1,4 +1,4 @@
-# Bowers D&I Platform
+# Open Door
 
 ## 🔗 Live site: https://bowers-di-platform.onrender.com
 
@@ -13,7 +13,7 @@ Browser ──▶ Next.js (React + TypeScript, static export)
            FastAPI (Python, uvicorn)
               │  reads / writes
               ▼
-           SQLite (bowers.db) ◀── PostgreSQL via DATABASE_URL
+           SQLite (opendoor.db) ◀── PostgreSQL via DATABASE_URL
 ```
 
 - **Frontend** (Next.js 15, static export): home, resources, conferences, programs, newsletter signup, appointments, staff dashboard. The backend serves the built export, so the site and API run on one URL.

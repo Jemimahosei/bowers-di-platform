@@ -1,4 +1,4 @@
-# Bowers D&I Platform — Deploy Notes
+# Open Door — Deploy Notes
 
 Backend rebuilt Nov 6, 2026 to the real spec (`REAL-SPEC.md`). Nothing was
 pushed; no live service was touched.
@@ -117,7 +117,7 @@ the homepage was showing the post-signup confirmation box. Reworked:
   confirmation step (confirmation link + Confirm button + the honest
   no-email note) lives on /newsletter only. Same endpoint and token
   flow — only the placement changed. The homepage hands the token to
-  /newsletter via sessionStorage (`bowers-pending-confirmation`); if
+  /newsletter via sessionStorage (`opendoor-pending-confirmation`); if
   that handoff is lost (e.g. a new tab), signing up again on
   /newsletter issues a fresh token, so the step still works.
 - **What you'll get, every issue.** A section below the hero frames
@@ -301,7 +301,7 @@ the mailer is off and campaigns queue instead of sending.
 **Backend** (`backend/`, FastAPI + SQLAlchemy, Python 3.12):
 
 - `app/database.py` — Postgres when `DATABASE_URL` is set, otherwise a
-  local SQLite file (`sqlite:///./bowers.db`). The old default pointed at
+  local SQLite file (`sqlite:///./opendoor.db`). The old default pointed at
   a docker-compose host that does not exist outside compose; the default
   is now SQLite.
 - `app/models.py` — User, SessionToken, Resource, Conference,
@@ -351,7 +351,7 @@ the mailer is off and campaigns queue instead of sending.
   are client components that fetch the API at runtime, so this is safe.
 
 **Deploy** (`render.yaml`, project root): one free Docker web service
-(`bowers-di-platform`, `dockerfilePath: backend/Dockerfile`,
+(`opendoor`, `dockerfilePath: backend/Dockerfile`,
 `dockerContext: .`, `healthCheckPath: /api/health`). `DATABASE_URL` is
 `sync: false` (unset by default → SQLite fallback).
 
@@ -364,7 +364,7 @@ promotes roles via `PATCH /api/auth/users/{id}/role`.
 
 Render allows only one free Postgres per workspace and it is already used
 by another project, so no managed Postgres is provisioned here. The
-default deploy runs on SQLite (`bowers.db` inside the container). That
+default deploy runs on SQLite (`opendoor.db` inside the container). That
 is fine for a demo, but container storage is ephemeral: **for persistent
 multi-user data, set `DATABASE_URL` to a Neon Postgres URL** (free tier)
 in the Render dashboard. The same code runs on both.
@@ -526,7 +526,7 @@ Run the tests: `cd backend && .venv/bin/python verify_backend.py`
   auth check — same as the Nov 6 dashboard; their UI strings are in the
   built JS bundles.
 - Default SQLite fallback verified: with no `DATABASE_URL`, the server
-  creates `./bowers.db`, seeds the demo admin + 25 resources + 5
+  creates `./opendoor.db`, seeds the demo admin + 25 resources + 5
   conferences + 10 events, and serves them.
 - Standalone seed verified: `python -m app.seed` → 1 user, 25 resources,
   5 conferences, 10 events, 0 participation / subscribers / appointments

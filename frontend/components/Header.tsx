@@ -19,8 +19,8 @@ export default function Header() {
         .catch(() => setUser(null));
     };
     load();
-    window.addEventListener("bowers-auth-changed", load);
-    return () => window.removeEventListener("bowers-auth-changed", load);
+    window.addEventListener("opendoor-auth-changed", load);
+    return () => window.removeEventListener("opendoor-auth-changed", load);
   }, []);
 
   function logout() {

@@ -1,6 +1,6 @@
 """Database setup.
 
-DATABASE_URL defaults to a local SQLite file (``sqlite:///./bowers.db``).
+DATABASE_URL defaults to a local SQLite file (``sqlite:///./opendoor.db``).
 Set DATABASE_URL to a Postgres URL for shared/multi-user deployments,
 e.g. a Neon Postgres URL on Render:
 
@@ -14,7 +14,7 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./bowers.db")
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./opendoor.db")
 
 connect_args = {}
 if DATABASE_URL.startswith("sqlite"):

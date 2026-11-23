@@ -155,7 +155,7 @@ def _send_resend(to_email: str, subject: str, text: str,
             "Content-Type": "application/json",
             # Resend sits behind Cloudflare, which refuses Python's
             # default User-Agent with error 1010.
-            "User-Agent": "bowers-di-platform/1.0 "
+            "User-Agent": "opendoor/1.0 "
                           "(+https://bowers-di-platform.onrender.com)",
         },
         method="POST",

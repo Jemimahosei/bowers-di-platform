@@ -118,7 +118,7 @@ class MailResendTests(unittest.TestCase):
                          "Bearer re_test_key_123")
         self.assertEqual(req.get_header("Content-type"), "application/json")
         ua = req.get_header("User-agent") or ""
-        self.assertIn("bowers-di-platform", ua)
+        self.assertIn("opendoor", ua)
         self.assertNotIn("Python-urllib", ua)
         payload = json.loads(req.data.decode())
         self.assertEqual(payload["from"],

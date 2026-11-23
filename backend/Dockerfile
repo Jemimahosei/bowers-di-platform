@@ -1,4 +1,4 @@
-# Bowers D&I Platform — single-container Docker build.
+# Open Door — single-container Docker build.
 #
 # Stage 1 builds the Next.js frontend to a static export (frontend/out).
 # Stage 2 runs the FastAPI backend, which serves the API and the built

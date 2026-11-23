@@ -1,4 +1,4 @@
-# Bowers D&I Platform — Architecture
+# Open Door — Architecture
 
 The Center for Belonging's working tool at Cornell CIS Bowers: it surfaces
 the Center's real resources to underrepresented students, tracks conference
@@ -14,10 +14,10 @@ flowchart TB
         S[Student / visitor<br/>browser]
         A[Center staff / admin<br/>browser]
     end
-    subgraph Render["Render — single free Docker web service (bowers-di-platform)"]
+    subgraph Render["Render — single free Docker web service (opendoor)"]
         FE[Static frontend<br/>Next.js 15 static export<br/>served from frontend/out]
         API[FastAPI backend<br/>uvicorn, one process]
-        DB[(SQLite file bowers.db<br/>— or Postgres when<br/>DATABASE_URL is set)]
+        DB[(SQLite file opendoor.db<br/>— or Postgres when<br/>DATABASE_URL is set)]
         FE -->|fetch /api/* same origin| API
         API -->|SQLAlchemy| DB
     end
