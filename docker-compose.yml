@@ -3,9 +3,9 @@ services:
     image: postgres:16
     environment:
       # Local development only — not a production credential.
-      POSTGRES_USER: bowers
-      POSTGRES_PASSWORD: bowers_dev
-      POSTGRES_DB: bowers_di
+      POSTGRES_USER: opendoor
+      POSTGRES_PASSWORD: opendoor_dev
+      POSTGRES_DB: opendoor
     ports:
       - "5432:5432"
     volumes:
@@ -14,7 +14,7 @@ services:
   api:
     build: ./backend
     environment:
-      DATABASE_URL: postgresql://bowers:bowers_dev@db:5432/bowers_di
+      DATABASE_URL: postgresql://opendoor:opendoor_dev@db:5432/opendoor
     ports:
       - "8000:8000"
     depends_on:

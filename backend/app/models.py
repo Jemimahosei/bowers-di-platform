@@ -1,4 +1,4 @@
-"""SQLAlchemy models for the Bowers D&I Platform (Center for Belonging,
+"""SQLAlchemy models for the Open Door (Center for Belonging,
 Cornell CIS Bowers).
 
 Content rules: no invented people, programs, or figures. Seed data lives

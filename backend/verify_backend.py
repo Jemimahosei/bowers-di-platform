@@ -105,7 +105,7 @@ def req_multipart(path, fields, files, token=None):
 
 
 def main():
-    db_path = Path("/tmp/bowers_verify.db")
+    db_path = Path("/tmp/opendoor_verify.db")
     if db_path.exists():
         db_path.unlink()
     env = dict(os.environ)

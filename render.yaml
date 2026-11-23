@@ -8,7 +8,7 @@ services:
     healthCheckPath: /api/health
     envVars:
       # Unset by default -> the backend falls back to a local SQLite file
-      # (bowers.db). For persistent multi-user data, set DATABASE_URL to a
+      # (opendoor.db). For persistent multi-user data, set DATABASE_URL to a
       # Neon Postgres URL. Render allows only one free Postgres per
       # workspace and it is already used by another project, so no
       # managed Postgres is provisioned here.
