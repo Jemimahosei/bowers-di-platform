@@ -135,18 +135,21 @@ def _resend_from(sender_name: str) -> str:
 
 
 def _send_resend(to_email: str, subject: str, text: str,
-                 sender_name: str) -> None:
-    """Deliver one plain-text message via Resend. Raises on failure.
+                 sender_name: str, html: str | None = None) -> None:
+    """Deliver one message via Resend. Raises on failure.
 
     The API key travels only in the Authorization header and is never
     included in the recorded error detail."""
     api_key = (os.environ.get("RESEND_API_KEY") or "").strip()
-    payload = json.dumps({
+    payload_dict = {
         "from": _resend_from(sender_name),
         "to": [to_email],
         "subject": subject,
         "text": text,
-    }).encode()
+    }
+    if html:
+        payload_dict["html"] = html
+    payload = json.dumps(payload_dict).encode()
     req = urllib.request.Request(
         "https://api.resend.com/emails",
         data=payload,
@@ -177,13 +180,15 @@ def _send_resend(to_email: str, subject: str, text: str,
 
 
 def _send_text(to_email: str, subject: str, text: str, sender_name: str,
-               smtp_from: str, cte: str | None = None) -> None:
-    """Send one plain-text message via the configured sender.
+               smtp_from: str, cte: str | None = None,
+               html: str | None = None) -> None:
+    """Send one message via the configured sender.
 
     SMTP builds an EmailMessage (``cte`` picks the transfer encoding —
     "7bit" for the confirmation email, so the long URL is never
-    folded); Resend posts the text as-is. Raises on failure — the
-    caller records it."""
+    folded); Resend posts the parts as-is. When ``html`` is given it
+    travels as the HTML alternative alongside the plain text. Raises
+    on failure — the caller records it."""
     if smtp_configured():
         msg = EmailMessage()
         msg["Subject"] = subject
@@ -193,6 +198,8 @@ def _send_text(to_email: str, subject: str, text: str, sender_name: str,
             msg.set_content(text, cte=cte)
         else:
             msg.set_content(text)
+        if html:
+            msg.add_alternative(html, subtype="html")
         try:
             _send_message(msg)
         except Exception as exc:  # noqa: BLE001 - record, then raise
@@ -201,15 +208,20 @@ def _send_text(to_email: str, subject: str, text: str, sender_name: str,
         LAST_ERROR["detail"] = ""
         return
     if resend_configured():
-        _send_resend(to_email, subject, text, sender_name)
+        _send_resend(to_email, subject, text, sender_name, html)
         return
     _record_failure("No email sender configured")
     raise RuntimeError("No email sender configured")
 
 
 def send_email(to_email: str, subject: str, body: str,
-               sender_name: str, unsubscribe_url: str) -> None:
-    """Send one plain-text campaign email. Raises on failure (caller records it)."""
+               sender_name: str, unsubscribe_url: str,
+               html_body: str | None = None) -> None:
+    """Send one campaign email. Raises on failure (caller records it).
+
+    ``body`` is the plain-text part (footer appended here);
+    ``html_body``, when given, is the complete HTML alternative —
+    it carries its own footer and unsubscribe link."""
     cfg = smtp_settings()
     full_body = body.rstrip() + (
         "\n\n—\n"
@@ -219,7 +231,8 @@ def send_email(to_email: str, subject: str, body: str,
         "To stop receiving these emails, visit: "
         f"{unsubscribe_url}\n"
     )
-    _send_text(to_email, subject, full_body, sender_name, cfg["from_addr"])
+    _send_text(to_email, subject, full_body, sender_name,
+               cfg["from_addr"], html=html_body)
 
 
 def send_confirmation_email(to_email: str, name: str,

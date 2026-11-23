@@ -18,9 +18,11 @@ non-/api paths.
 """
 
 import csv
+import html as _html
 import io
 import json
 import os
+import re
 import secrets
 from collections import Counter, defaultdict
 from contextlib import asynccontextmanager
@@ -1301,6 +1303,174 @@ def _issue_body(campaign: models.Campaign, db: Session) -> str:
     return "\n".join(lines)
 
 
+# Direct links for featured resources in the email, matching the
+# homepage map (Jemimah, 2026-11-22): each resource links to its own
+# site — the "Learn more" destinations on Cornell's resources hub —
+# not back to the hub page the database row carries.
+_RESOURCE_DIRECT_LINKS = {
+    "Anti-racism, antisemitism, and Islamophobia resources":
+        "https://diversity.cornell.edu/community-resources/diversity-and-inclusion-resources",
+    "Mental health and wellbeing": "https://mentalhealth.cornell.edu/",
+    "Bias reporting":
+        "https://diversity.cornell.edu/initiatives-programs/bias-reporting-cornell",
+    "Accessibility and disability resources":
+        "https://diversity.cornell.edu/initiatives-programs/disability-access",
+    "OIETIX (Title IX)": "https://titleix.cornell.edu/",
+    "LGBTQ+ resources":
+        "https://diversity.cornell.edu/our-community/staff-resources/lgbtq-staff-faculty/transgender-inclusion-cornell",
+    "OADI": "https://oadi.cornell.edu/",
+    "Belonging & Support Services (Student & Campus Life)":
+        "https://scl.cornell.edu/belonging-support-services",
+    "Student Disability Services": "https://sds.cornell.edu",
+    "Future Faculty teaching and mentoring": "https://futurefaculty.cornell.edu/",
+    "OISE (graduate development)":
+        "https://gradschool.cornell.edu/diversity-inclusion/about-oise/",
+    "Office of Postdoctoral Studies": "https://postdocs.cornell.edu/",
+    "International Services (Office of Global Learning)":
+        "https://international.globallearning.cornell.edu/",
+    "Colleague Network Groups (HR employee resource groups)":
+        "https://hr.cornell.edu/culture/community/colleague-network-groups",
+    "Department of Inclusion and Belonging (HR)":
+        "https://hr.cornell.edu/culture/inclusion-and-belonging",
+    "Inclusive Excellence Network (staff)":
+        "https://hr.cornell.edu/culture/inclusion-belonging/learning-and-development",
+    "OFDD (faculty development and diversity)":
+        "https://facultydevelopment.cornell.edu/",
+    "CTI inclusive-teaching course":
+        "https://teaching.cornell.edu/programs/faculty-instructors/faculty-institutes",
+    "CTL (startups and commercialization)": "https://ctl.cornell.edu/",
+    "Diversity Alumni Programs and Cornell Mosaic":
+        "https://alumni.cornell.edu/connect/diversity/",
+}
+
+_SERIF = "Georgia, 'Times New Roman', Times, serif"
+_ACCENT = "#9e1b1b"  # deep carnelian
+
+
+def _body_to_html(body: str) -> str:
+    """Render the staff's plain-text body as article HTML.
+
+    Paragraphs split on blank lines. A paragraph that is a single
+    short line with no ending punctuation reads as a section heading
+    ("Conferences", "From the office"). Bare URLs become links.
+    Everything is escaped first — staff text is never raw HTML.
+    """
+    out = []
+    for block in re.split(r"\n\s*\n", body.strip()):
+        lines = [ln.strip() for ln in block.split("\n") if ln.strip()]
+        if not lines:
+            continue
+        if len(lines) == 1:
+            text = lines[0]
+            if (len(text.split()) <= 6 and len(text) <= 60
+                    and not text.endswith((".", "!", "?", ":", ",", ";"))):
+                out.append(
+                    f'<h2 style="font-family:{_SERIF};font-size:21px;'
+                    f'font-weight:normal;color:#111111;margin:30px 0 10px;'
+                    f'border-top:1px solid #dddddd;padding-top:18px;">'
+                    f'{_html.escape(text)}</h2>')
+                continue
+        parts = []
+        for ln in lines:
+            esc = _html.escape(ln)
+            esc = re.sub(
+                r"(https?://[^\s<]+)",
+                rf'<a href="\1" style="color:{_ACCENT};'
+                r'text-decoration:underline;">\1</a>',
+                esc)
+            parts.append(esc)
+        out.append(
+            '<p style="margin:0 0 16px;">' + "<br>".join(parts) + "</p>")
+    return "\n".join(out)
+
+
+def _issue_html(campaign: models.Campaign, db: Session,
+                unsubscribe_url: str) -> str:
+    """The issue as an editorial HTML email — masthead, headline and
+    article body in the manner of a Substack letter or a newspaper
+    article (Jemimah, 2026-11-22). Plain text remains the fallback
+    part for clients that do not render HTML."""
+    featured = _featured_resources(db, campaign)
+    date_line = datetime.utcnow().strftime("%B %-d, %Y")
+    parts = [
+        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,"
+        "initial-scale=1'></head>",
+        "<body style='margin:0;padding:0;background-color:#faf9f6;'>",
+        "<table role='presentation' width='100%' cellpadding='0' "
+        "cellspacing='0'><tr><td align='center'>",
+        "<table role='presentation' width='620' cellpadding='0' "
+        "cellspacing='0' style='max-width:620px;width:100%;"
+        "background-color:#ffffff;'><tr><td "
+        "style='padding:36px 40px 44px;'>",
+        # Masthead
+        "<div style='border-top:3px solid #111111;"
+        "border-bottom:1px solid #111111;padding:16px 0 12px;"
+        "text-align:center;'>"
+        f"<div style='font-family:{_SERIF};font-size:32px;"
+        "color:#111111;letter-spacing:0.5px;'>Open Door</div>"
+        "<div style='font-family:Arial,Helvetica,sans-serif;"
+        "font-size:10px;letter-spacing:2.5px;text-transform:uppercase;"
+        "color:#777777;margin-top:6px;'>The newsletter of the Center "
+        "for Belonging &middot; Cornell Bowers CIS</div></div>",
+        # Headline + dateline
+        f"<h1 style='font-family:{_SERIF};font-size:27px;line-height:1.3;"
+        f"font-weight:normal;color:#111111;margin:28px 0 8px;'>"
+        f"{_html.escape(campaign.subject)}</h1>",
+        f"<div style='font-family:Arial,Helvetica,sans-serif;"
+        f"font-size:12px;color:#888888;margin-bottom:24px;'>"
+        f"{_html.escape(campaign.sender_name)} &middot; {date_line}</div>",
+        # Article body
+        f"<div style='font-family:{_SERIF};font-size:17px;"
+        f"line-height:1.7;color:#222222;'>",
+        _body_to_html(campaign.body),
+        "</div>",
+    ]
+    if featured:
+        parts.append(
+            f"<h2 style='font-family:{_SERIF};font-size:21px;"
+            "font-weight:normal;color:#111111;margin:30px 0 6px;"
+            "border-top:1px solid #dddddd;padding-top:18px;'>"
+            "Resources from the Center</h2>")
+        for r in featured:
+            link = _RESOURCE_DIRECT_LINKS.get(r["title"]) or r["link"]
+            parts.append("<div style='padding:12px 0;"
+                         "border-bottom:1px solid #eeeeee;'>")
+            parts.append(
+                f"<div style='font-family:{_SERIF};font-size:17px;"
+                f"color:#111111;'>{_html.escape(r['title'])}</div>")
+            if r["description"]:
+                parts.append(
+                    f"<div style='font-family:{_SERIF};font-size:15px;"
+                    f"line-height:1.6;color:#444444;margin-top:3px;'>"
+                    f"{_html.escape(r['description'])}</div>")
+            if link:
+                parts.append(
+                    f"<div style='margin-top:5px;'>"
+                    f"<a href='{_html.escape(link, quote=True)}' "
+                    f"style='font-family:Arial,Helvetica,sans-serif;"
+                    f"font-size:13px;color:{_ACCENT};"
+                    f"text-decoration:underline;'>Visit resource "
+                    f"&rarr;</a></div>")
+            parts.append("</div>")
+    parts += [
+        # Footer
+        "<div style='margin-top:34px;border-top:1px solid #dddddd;"
+        "padding-top:16px;font-family:Arial,Helvetica,sans-serif;"
+        "font-size:12px;line-height:1.6;color:#888888;'>"
+        f"{_html.escape(campaign.sender_name)}, Center for Belonging "
+        "&mdash; Cornell Bowers CIS<br>"
+        "You are receiving this issue because the Center for Belonging "
+        "has your contact information or you signed up for Center "
+        "updates. "
+        f"<a href='{_html.escape(unsubscribe_url, quote=True)}' "
+        "style='color:#888888;text-decoration:underline;'>"
+        "Unsubscribe</a></div>",
+        "</td></tr></table></td></tr></table></body></html>",
+    ]
+    return "".join(parts)
+
+
 def _validate_resource_ids(db: Session, resource_ids: list) -> None:
     for rid in resource_ids:
         if db.get(models.Resource, rid) is None:
@@ -1586,12 +1756,14 @@ def send_campaign(
     issue_body = _issue_body(row, db)
     for recipient in queued:
         try:
+            unsub = f"{base}/unsubscribe?email={recipient.email}"
             mail.send_email(
                 recipient.email,
                 row.subject,
                 issue_body,
                 row.sender_name,
-                f"{base}/unsubscribe?email={recipient.email}",
+                unsub,
+                html_body=_issue_html(row, db, unsub),
             )
             recipient.status = "sent"
             recipient.sent_at = datetime.utcnow()
