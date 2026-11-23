@@ -6,7 +6,7 @@
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-export const TOKEN_KEY = "bowers_token";
+export const TOKEN_KEY = "opendoor_token";
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -17,7 +17,7 @@ export function setToken(token: string | null) {
   if (typeof window === "undefined") return;
   if (token) window.localStorage.setItem(TOKEN_KEY, token);
   else window.localStorage.removeItem(TOKEN_KEY);
-  window.dispatchEvent(new Event("bowers-auth-changed"));
+  window.dispatchEvent(new Event("opendoor-auth-changed"));
 }
 
 export interface User {
