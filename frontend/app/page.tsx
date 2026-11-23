@@ -39,6 +39,56 @@ const BELONGING_LINK = "https://bowers.cornell.edu/belonging-bowers";
 const HUB_LINK =
   "https://bowers.cornell.edu/belonging-bowers/resources-and-support";
 
+/* Direct links for the homepage listings, taken from Cornell's own
+ * pages (Jemimah, 2026-11-22: rows must link to the actual resource
+ * or program page, not all to the Belonging homepage). Program links
+ * are the "Learn more" destinations on bowers.cornell.edu/belonging-
+ * bowers; resource links are the "Learn more" destinations on the
+ * resources-and-support hub. Listings with no real page of their own
+ * (Meta Days, Impact Week, GHC India) get no link rather than a
+ * generic one. Keyed by the exact name/title in the platform data. */
+const DIRECT_LINKS: Record<string, string> = {
+  // Programs (events)
+  "Two-year career program": "https://bowers.cornell.edu/belonging-bowers/ascend",
+  CSMore: "https://bowers.cornell.edu/belonging-bowers/csmore",
+  "Belonging at Bowers Awards": "https://bowers.cornell.edu/excellence-awards/belonging-awards",
+  "Dinner with the Deans+": "https://bowers.cornell.edu/belonging-bowers/dinner-deans",
+  EngageLEAP: "https://bowers.cornell.edu/belonging-bowers/engage-leap",
+  "Weeklong immersive research workshop": "https://bowers.cornell.edu/node/7419",
+  "Alumni mentorship small groups":
+    "https://bowers.cornell.edu/news-stories/bowers-alumni-roundtable-yields-helpful-advice-undergrads",
+  // Community resources
+  "Anti-racism, antisemitism, and Islamophobia resources":
+    "https://diversity.cornell.edu/community-resources/diversity-and-inclusion-resources",
+  "Mental health and wellbeing": "https://mentalhealth.cornell.edu/",
+  "Bias reporting": "https://diversity.cornell.edu/initiatives-programs/bias-reporting-cornell",
+  "Accessibility and disability resources":
+    "https://diversity.cornell.edu/initiatives-programs/disability-access",
+  "OIETIX (Title IX)": "https://titleix.cornell.edu/",
+  "LGBTQ+ resources":
+    "https://diversity.cornell.edu/our-community/staff-resources/lgbtq-staff-faculty/transgender-inclusion-cornell",
+  OADI: "https://oadi.cornell.edu/",
+  "Belonging & Support Services (Student & Campus Life)":
+    "https://scl.cornell.edu/belonging-support-services",
+  "Student Disability Services": "https://sds.cornell.edu",
+  "Future Faculty teaching and mentoring": "https://futurefaculty.cornell.edu/",
+  "OISE (graduate development)": "https://gradschool.cornell.edu/diversity-inclusion/about-oise/",
+  "Office of Postdoctoral Studies": "https://postdocs.cornell.edu/",
+  "International Services (Office of Global Learning)":
+    "https://international.globallearning.cornell.edu/",
+  "Colleague Network Groups (HR employee resource groups)":
+    "https://hr.cornell.edu/culture/community/colleague-network-groups",
+  "Department of Inclusion and Belonging (HR)":
+    "https://hr.cornell.edu/culture/inclusion-and-belonging",
+  "Inclusive Excellence Network (staff)":
+    "https://hr.cornell.edu/culture/inclusion-belonging/learning-and-development",
+  "OFDD (faculty development and diversity)": "https://facultydevelopment.cornell.edu/",
+  "CTI inclusive-teaching course":
+    "https://teaching.cornell.edu/programs/faculty-instructors/faculty-institutes",
+  "CTL (startups and commercialization)": "https://ctl.cornell.edu/",
+  "Diversity Alumni Programs and Cornell Mosaic": "https://alumni.cornell.edu/connect/diversity/",
+};
+
 /* The mockup's example rows, shown when the API has nothing live yet
  * (the mockup itself labels its rows as examples for staff to fill). */
 const EXAMPLE_ROWS: IssueRow[] = [
@@ -120,7 +170,7 @@ export default function Home() {
                 title: c.name,
                 note: c.description ?? "",
                 when: formatDateRange(c.date, c.end_date),
-                link: c.link || BELONGING_LINK,
+                link: c.link || DIRECT_LINKS[c.name] || "",
               })
             );
         }
@@ -133,7 +183,7 @@ export default function Home() {
               title: e.name,
               note: e.description ?? "",
               when: e.date ?? "",
-              link: BELONGING_LINK,
+              link: DIRECT_LINKS[e.name] || "",
             })
           );
         }
@@ -144,7 +194,7 @@ export default function Home() {
               title: r.title,
               note: r.description,
               when: "",
-              link: r.link || HUB_LINK,
+              link: DIRECT_LINKS[r.title] || r.link || HUB_LINK,
             })
           );
         }
