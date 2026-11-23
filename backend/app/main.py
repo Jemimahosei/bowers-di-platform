@@ -614,6 +614,19 @@ def book_slot(
     db.add(row)
     db.commit()
     db.refresh(row)
+    if mail.email_configured():
+        # The success copy promises a confirmation email — send it.
+        # Non-fatal: a mail failure must never lose the booking.
+        try:
+            mail.send_booking_confirmation_email(
+                email,
+                row.name,
+                f"{slot.date.isoformat()} at {slot.start_time}",
+                slot.type,
+                slot.host,
+            )
+        except Exception:  # noqa: BLE001 - booking already saved
+            pass
     return _booking_out(row, db)
 
 
@@ -1561,7 +1574,6 @@ def send_campaign(
             "Set RESEND_API_KEY and RESEND_FROM to send (see DEPLOY_NOTES.md).",
         }
     base = (os.environ.get("FRONTEND_URL") or str(request.base_url)).rstrip("/")
-    unsubscribe_url = f"{base}/newsletter"
     queued = (
         db.query(models.CampaignRecipient)
         .filter(
@@ -1579,7 +1591,7 @@ def send_campaign(
                 row.subject,
                 issue_body,
                 row.sender_name,
-                unsubscribe_url,
+                f"{base}/unsubscribe?email={recipient.email}",
             )
             recipient.status = "sent"
             recipient.sent_at = datetime.utcnow()

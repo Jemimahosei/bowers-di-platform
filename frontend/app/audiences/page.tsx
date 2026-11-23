@@ -10,6 +10,15 @@ import {
   type OrgSubmission,
   type User,
 } from "../../lib/api";
+import StaffTabs from "../../components/StaffTabs";
+
+/* Staff board — Audiences (mockup 02, second tab).
+ * Top: the mockup's review list — organizations that shared their
+ * lists wait here; staff Approve / Decline each one (existing
+ * reviewOrgSubmission API; the API has no un-review, so settled rows
+ * show their result without the mockup's Undo — see APPLY_NOTES.md).
+ * Below, unchanged in capability: create an audience, all audiences,
+ * and per-audience management (add contact, CSV upload, contacts). */
 
 const ORG_SUGGESTIONS = ["NSBE", "URMC", "CampusGroups"];
 
@@ -208,7 +217,7 @@ export default function AudiencesPage() {
       setNotice(
         decision === "approve"
           ? `Approved — ${result.contacts_added ?? 0} contacts added to an audience.`
-          : "Submission rejected."
+          : "Submission declined."
       );
       refresh();
     } catch {
@@ -216,15 +225,20 @@ export default function AudiencesPage() {
     }
   }
 
-  if (!authChecked) return <div className="container"><p>Loading…</p></div>;
+  if (!authChecked)
+    return (
+      <div className="od-staff-wrap">
+        <p>Loading…</p>
+      </div>
+    );
 
   if (!user || user.role !== "admin") {
     return (
-      <div className="container">
-        <h1>Audiences</h1>
-        <p className="error">
-          Audiences are staff only. Please{" "}
-          <Link href="/login">log in</Link> with a staff account.
+      <div className="od-staff-wrap">
+        <h1 className="od-board-title">Audiences</h1>
+        <p className="error" style={{ marginTop: 16 }}>
+          Audiences are staff only. Please <Link href="/login">sign in</Link>{" "}
+          with a staff account.
         </p>
         <p className="lede">
           Audiences are the groups the Center reaches — built from student
@@ -236,19 +250,91 @@ export default function AudiencesPage() {
   }
 
   const pending = submissions.filter((s) => s.status === "pending");
+  const reviewed = submissions.filter((s) => s.status !== "pending");
+  const approvedContacts = audiences.reduce(
+    (t, a) => t + a.contact_count,
+    0
+  );
 
   return (
-    <div className="container">
-      <h1>Audiences — who to reach</h1>
-      <p className="lede">
-        The Center reaches students through the organizations they belong
-        to. Lists are shared <strong>with the org&apos;s agreement</strong> —
-        this platform provides the intake, it never takes a list.
-      </p>
-      {error && <p className="error">{error}</p>}
-      {notice && <p className="success">{notice}</p>}
+    <div className="od-staff-wrap">
+      <StaffTabs active="audiences" />
+      {error && (
+        <p className="error" style={{ marginTop: 16 }}>
+          {error}
+        </p>
+      )}
+      {notice && (
+        <p className="success" style={{ marginTop: 16 }}>
+          {notice}
+        </p>
+      )}
 
-      <h2>Create an audience</h2>
+      <section style={{ marginTop: 28 }}>
+        <h1 className="od-board-title">Audiences</h1>
+        <p className="lede" style={{ marginTop: 14 }}>
+          Student organizations share their lists with the Center, and
+          nobody is added without approval. Lists sent in by an
+          organization wait here for review.
+        </p>
+
+        <div className="od-list-rows">
+          {pending.length === 0 && reviewed.length === 0 && (
+            <p style={{ padding: "16px 8px" }}>
+              No organization lists have been submitted yet.
+            </p>
+          )}
+          {pending.map((s) => (
+            <div className="od-list-row" key={s.id}>
+              <div className="row-main">
+                <div className="row-title">{s.org_name}</div>
+                <div className="row-sub">
+                  Submitted by {s.rep_name || s.rep_email}
+                  {s.rep_name ? ` (${s.rep_email})` : ""},{" "}
+                  {s.contacts.length} contacts
+                  {s.notes ? ` — ${s.notes}` : ""}
+                </div>
+              </div>
+              <div className="row-actions">
+                <button onClick={() => reviewSubmission(s.id, "approve")}>
+                  Approve
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() => reviewSubmission(s.id, "reject")}
+                >
+                  Decline
+                </button>
+              </div>
+            </div>
+          ))}
+          {reviewed.map((s) => (
+            <div className="od-list-row" key={s.id}>
+              <div className="row-main">
+                <div className="row-title">{s.org_name}</div>
+                <div className="row-sub">
+                  Submitted by {s.rep_name || s.rep_email},{" "}
+                  {s.contacts.length} contacts
+                </div>
+              </div>
+              <div className="row-actions">
+                <span style={{ fontWeight: 600 }}>
+                  {s.status === "approved" ? "Approved" : "Declined"}
+                  {s.status === "approved" && s.contacts_added != null
+                    ? ` — ${s.contacts_added} contacts added`
+                    : ""}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <p style={{ margin: "18px 0 0", color: "var(--secondary)" }}>
+          Approved contacts across organizations:{" "}
+          <strong>{approvedContacts}</strong>
+        </p>
+      </section>
+
+      <h2 style={{ marginTop: 56 }}>Create an audience</h2>
       <form className="form" onSubmit={createAudience}>
         <label>
           Audience name
@@ -292,7 +378,10 @@ export default function AudiencesPage() {
 
       <h2>All audiences</h2>
       {audiences.length === 0 ? (
-        <p>No audiences yet. Create one above, or wait for an org to submit its contacts.</p>
+        <p>
+          No audiences yet. Create one above, or wait for an org to submit
+          its contacts.
+        </p>
       ) : (
         <table>
           <thead>
@@ -312,7 +401,10 @@ export default function AudiencesPage() {
                 <td>{a.contact_count}</td>
                 <td>{a.opted_out_count}</td>
                 <td>
-                  <button className="secondary" onClick={() => openAudience(a.id)}>
+                  <button
+                    className="secondary"
+                    onClick={() => openAudience(a.id)}
+                  >
                     Manage
                   </button>
                 </td>
@@ -380,7 +472,11 @@ export default function AudiencesPage() {
           <p className="lede">
             Columns: <code>name, email, org, interests</code> (interests
             separated by semicolons).{" "}
-            <button className="secondary" type="button" onClick={downloadTemplate}>
+            <button
+              className="secondary"
+              type="button"
+              onClick={downloadTemplate}
+            >
               Download template
             </button>
           </p>
@@ -468,56 +564,6 @@ export default function AudiencesPage() {
               </tbody>
             </table>
           )}
-        </>
-      )}
-
-      <h2>Org submissions — pending review</h2>
-      <p className="lede">
-        When an org representative submits their group&apos;s contacts, they
-        land here. Staff approve them into an audience — they are never
-        added automatically.
-      </p>
-      {pending.length === 0 ? (
-        <p>No pending submissions.</p>
-      ) : (
-        pending.map((s) => (
-          <div className="card" key={s.id} style={{ marginBottom: "1rem" }}>
-            <h3 style={{ marginTop: 0 }}>
-              {s.org_name} — {s.contacts.length} contacts
-            </h3>
-            <p>
-              From {s.rep_name || "—"} ({s.rep_email})
-              {s.notes ? ` — ${s.notes}` : ""}
-            </p>
-            <p>
-              {s.contacts
-                .map((c) => `${c.name || c.email} <${c.email}>`)
-                .join("; ")}
-            </p>
-            <button onClick={() => reviewSubmission(s.id, "approve")}>
-              Approve into {s.org_name} audience
-            </button>{" "}
-            <button
-              className="secondary"
-              onClick={() => reviewSubmission(s.id, "reject")}
-            >
-              Reject
-            </button>
-          </div>
-        ))
-      )}
-      {submissions.filter((s) => s.status !== "pending").length > 0 && (
-        <>
-          <h3>Reviewed submissions</h3>
-          <ul>
-            {submissions
-              .filter((s) => s.status !== "pending")
-              .map((s) => (
-                <li key={s.id}>
-                  {s.org_name} — {s.status} ({s.contacts.length} contacts)
-                </li>
-              ))}
-          </ul>
         </>
       )}
     </div>

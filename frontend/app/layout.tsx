@@ -3,9 +3,9 @@ import Header from "../components/Header";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Belonging at Bowers — Center for Belonging, Cornell Bowers CIS",
+  title: "Open Door — Center for Belonging, Cornell Bowers CIS",
   description:
-    "Welcome — the Center for Belonging's newsletter brings Cornell students a steady supply of the Center's resources and opportunities: real resources in every issue, conference funding and deadlines, events and programs — plus audiences from student organizations, real appointment booking with Dr. Roberts, resources, conferences, and programs.",
+    "Open Door is the newsletter from the Center for Belonging at Cornell Bowers CIS. Each issue lists the conferences, funding, programs and support open to Bowers students right now, with the deadline next to each one.",
 };
 
 export default function RootLayout({
@@ -21,30 +21,13 @@ export default function RootLayout({
         <footer className="footer">
           <div className="footer-inner">
             <p>
-              Center for Belonging — Cornell Bowers CIS Office of Diversity,
-              Equity, Inclusion, and Belonging (DEIB). Director: Dr. LeeAnn
-              Roberts. Associate Dean for Belonging: Hakim Weatherspoon.
+              Open Door is a project of the Center for Belonging, Cornell
+              Bowers CIS.
             </p>
             <p>
-              Contact:{" "}
+              Questions:{" "}
               <a href="mailto:deib-office@bowers.cornell.edu">
                 deib-office@bowers.cornell.edu
-              </a>{" "}
-              ·{" "}
-              <a
-                href="https://diversity.cis.cornell.edu"
-                target="_blank"
-                rel="noopener"
-              >
-                diversity.cis.cornell.edu
-              </a>{" "}
-              ·{" "}
-              <a
-                href="https://bowers.cornell.edu/belonging-bowers"
-                target="_blank"
-                rel="noopener"
-              >
-                Belonging at Bowers
               </a>
             </p>
           </div>

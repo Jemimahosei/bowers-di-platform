@@ -254,3 +254,30 @@ def send_confirmation_email(to_email: str, name: str,
         to_email,
         "Confirm your subscription to the Center for Belonging newsletter",
         body, "Center for Belonging", cfg["from_addr"], cte="7bit")
+
+
+def send_booking_confirmation_email(to_email: str, name: str,
+                                    when_label: str, slot_type: str,
+                                    host: str) -> None:
+    """Send the confirmation email for a booked time with the host.
+
+    The booking flow has always told students "a confirmation is on
+    its way" — this is the email that promise refers to. Raises on
+    failure; the caller (book_slot) treats a failure as non-fatal so
+    a mail problem can never lose a booking. Plain ASCII / 7bit like
+    the newsletter confirmation.
+    """
+    cfg = smtp_settings()
+    greeting = f"Hi {name}," if name else "Hi there,"
+    kind = "in person" if slot_type == "in-person" else "by phone/video call"
+    body = (
+        f"{greeting}\n\n"
+        f"Your time with {host} is booked.\n\n"
+        f"When: {when_label} ({kind})\n\n"
+        "If you need to change or cancel, just reply to this email.\n\n"
+        "Center for Belonging, Cornell Bowers CIS\n"
+    )
+    _send_text(
+        to_email,
+        f"Your booking with {host} is confirmed",
+        body, "Center for Belonging", cfg["from_addr"], cte="7bit")
