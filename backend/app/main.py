@@ -403,7 +403,6 @@ def newsletter_signup(
             source=payload.source,
             status="confirmed",
             confirmation_token=None,
-            confirmed_at=datetime.utcnow(),
         )
         db.add(row)
         db.commit()
@@ -416,7 +415,6 @@ def newsletter_signup(
         row.source = payload.source or row.source
         row.status = "confirmed"
         row.confirmation_token = None
-        row.confirmed_at = datetime.utcnow()
         db.commit()
         status_code = 200
     # The welcome note: a short email that says they are subscribed.
@@ -454,7 +452,6 @@ def newsletter_confirm(token: str = Query(default=""), db: Session = Depends(get
         if row is not None:
             row.status = "confirmed"
             row.confirmation_token = None
-            row.confirmed_at = datetime.utcnow()
             db.commit()
     return RedirectResponse(url="/newsletter", status_code=302)
 

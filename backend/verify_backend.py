@@ -278,57 +278,31 @@ def main():
         status, body = req("POST", "/api/newsletter/signup", {
             "name": "Core Person", "email": "core@cornell.edu",
             "interests": [], "topics": [], "source": "website"})
-        check("Cornell signup -> 201 + token + url",
-              status == 201 and body.get("confirmation_token")
-              and body.get("confirmation_url", "").endswith(
-                  body.get("confirmation_token", "")),
+        check("Cornell signup -> 201, subscribed at once, no token",
+              status == 201 and body.get("ok") is True
+              and "confirmation_token" not in body,
               f"status={status} body={body}")
-        check("signup with no email configured -> email_sent False, fallback token returned",
+        check("signup with no email configured -> email_sent False",
               body.get("email_sent") is False
-              and body.get("email_configured") is False
-              and body.get("confirmation_token"),
+              and body.get("email_configured") is False,
               f"body={body}")
-        core_token = body.get("confirmation_token")
-        status, body = req("GET",
-                           f"/api/newsletter/confirm?token={core_token}")
-        check("Cornell signup confirm -> ok + email",
-              status == 200 and body.get("email") == "core@cornell.edu",
-              f"status={status} body={body}")
         status, body = req("POST", "/api/newsletter/signup", {
             "name": "News Person", "email": "news@cornell.edu",
             "interests": ["Tapia"], "topics": ["events"], "source": "website"})
-        check("newsletter signup -> 201 + token + url",
-              status == 201 and body.get("confirmation_token")
-              and body.get("confirmation_url", "").endswith(
-                  body.get("confirmation_token", "")),
+        check("newsletter signup -> 201, subscribed at once",
+              status == 201 and body.get("ok") is True
+              and "confirmation_token" not in body,
               f"status={status} body={body}")
-        token1 = body.get("confirmation_token")
-        status, body = req("GET",
-                           f"/api/newsletter/confirm?token={token1}")
-        check("newsletter confirm -> ok + email",
-              status == 200 and body.get("email") == "news@cornell.edu",
-              f"status={status} body={body}")
-        status, body = req("GET",
-                           f"/api/newsletter/confirm?token={token1}")
-        check("confirm reuse -> 400", status == 400, f"status={status}")
         status, body = req("POST", "/api/newsletter/signup", {
             "name": "News Person", "email": "news@cornell.edu",
             "interests": [], "topics": [], "source": "website"})
-        check("signup when confirmed -> already_subscribed",
+        check("signup when subscribed -> already_subscribed",
               status == 200 and body.get("already_subscribed") is True,
               f"status={status} body={body}")
         status, body = req("POST", "/api/newsletter/signup", {
             "name": "Pending Person", "email": "pending@cornell.edu",
             "interests": [], "topics": [], "source": "tabling"})
         check("second signup -> 201", status == 201, f"status={status}")
-        token2 = body.get("confirmation_token")
-        status, body = req("POST", "/api/newsletter/signup", {
-            "name": "Pending Person", "email": "pending@cornell.edu",
-            "interests": [], "topics": [], "source": "tabling"})
-        check("pending re-signup re-issues token",
-              status == 200 and body.get("confirmation_token")
-              and body.get("confirmation_token") != token2,
-              f"status={status} body={body}")
         status, body = req("POST", "/api/newsletter/unsubscribe",
                            {"email": "news@cornell.edu"})
         check("unsubscribe -> ok", status == 200 and body.get("ok") is True)
@@ -338,7 +312,7 @@ def main():
         check("admin subscribers list",
               status == 200 and subs.get("news@cornell.edu", {}).get("status")
               == "unsubscribed"
-              and subs.get("pending@cornell.edu", {}).get("status") == "pending"
+              and subs.get("pending@cornell.edu", {}).get("status") == "confirmed"
               and subs.get("core@cornell.edu", {}).get("status") == "confirmed",
               f"status={status} body={body}")
         status, body = req("GET", "/api/newsletter/subscribers",
@@ -581,21 +555,19 @@ def main():
         status, body = req("POST", "/api/newsletter/signup", {
             "name": "Confirmed Person", "email": "confirm@cornell.edu",
             "interests": [], "topics": [], "source": "website"})
-        confirm_token = body.get("confirmation_token")
-        req("GET", f"/api/newsletter/confirm?token={confirm_token}")
         status, body = req("POST", "/api/campaigns", {
             "subject": "All members", "body": "hello everyone",
             "audience_ids": [nsbe_id, urmc_audience_id],
             "include_self_signup": True}, token=admin_token)
-        check("campaign incl. self-signup counts 5 contacts + 2 subscribers",
-              status == 201 and body.get("recipient_count") == 7,
+        check("campaign incl. self-signup counts 5 contacts + 3 subscribers",
+              status == 201 and body.get("recipient_count") == 8,
               f"status={status} body={body}")
         # An issue can go to newsletter subscribers alone — no audience.
         status, body = req("POST", "/api/campaigns", {
             "subject": "Subscribers only", "body": "for the list",
             "include_self_signup": True}, token=admin_token)
-        check("subscribers-only issue -> 201, 2 confirmed subscribers",
-              status == 201 and body.get("recipient_count") == 2,
+        check("subscribers-only issue -> 201, 3 confirmed subscribers",
+              status == 201 and body.get("recipient_count") == 3,
               f"status={status} body={body}")
         subs_only_id = body.get("id")
         status, body = req("PATCH", f"/api/campaigns/{subs_only_id}",
@@ -707,7 +679,7 @@ def main():
         totals = body.get("totals", {}) if isinstance(body, dict) else {}
         check("dashboard totals reflect real rows",
               status == 200 and totals.get("subscribers") == 4
-              and totals.get("confirmed_subscribers") == 2
+              and totals.get("confirmed_subscribers") == 3
               and totals.get("audiences") == 2
               and totals.get("contacts") == 6
               and totals.get("opted_out_contacts") == 1
