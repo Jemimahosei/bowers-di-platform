@@ -1,7 +1,7 @@
 """Resend sender checks for app.mail (mocked HTTP — nothing is really sent).
 
 Covers the Resend path added Nov 21, 2026: with RESEND_API_KEY set and
-no SMTP, the confirmation email POSTs to api.resend.com with the right
+no SMTP, the welcome email POSTs to api.resend.com with the right
 headers; with neither set, email is unconfigured; a Resend HTTP error
 is recorded in last_error() and raised to the caller.
 
@@ -22,8 +22,8 @@ from unittest import mock
 import app.mail as mail
 
 LONG_TOKEN = "x" * 90
-CONFIRM_URL = (
-    "https://bowers-di-platform.onrender.com/newsletter?token=" + LONG_TOKEN
+UNSUB_URL = (
+    "https://bowers-di-platform.onrender.com/unsubscribe?email=abc123@cornell.edu"
 )
 
 EMAIL_VARS = (
@@ -104,12 +104,12 @@ class MailResendTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         return calls
 
-    def test_confirmation_via_resend_posts_to_api(self):
+    def test_welcome_via_resend_posts_to_api(self):
         """(a) RESEND_API_KEY set, no SMTP: POSTs to api.resend.com."""
         os.environ["RESEND_API_KEY"] = "re_test_key_123"
         calls = self._capture_urlopen()
-        mail.send_confirmation_email("abc123@cornell.edu", "Test Person",
-                                     CONFIRM_URL)
+        mail.send_welcome_email("abc123@cornell.edu", "Test Person",
+                                     UNSUB_URL)
         self.assertEqual(len(calls), 1)
         req = calls[0]
         self.assertEqual(req.full_url, "https://api.resend.com/emails")
@@ -126,11 +126,11 @@ class MailResendTests(unittest.TestCase):
         self.assertEqual(payload["to"], ["abc123@cornell.edu"])
         self.assertEqual(
             payload["subject"],
-            "Confirm your subscription to the Center for Belonging newsletter")
+            "You're subscribed - welcome to Open Door")
         text = payload["text"]
         self.assertIn("Hi Test Person,", text)
         # The long URL goes out whole on one line — never folded.
-        self.assertIn(CONFIRM_URL, text)
+        self.assertIn(UNSUB_URL, text)
         self.assertTrue(all(ord(ch) < 128 for ch in text))
         self.assertEqual(mail.last_error(), "")
 
@@ -165,8 +165,8 @@ class MailResendTests(unittest.TestCase):
             io.BytesIO(b'{"message": "Invalid API key"}'))
         with mock.patch.object(urllib.request, "urlopen", side_effect=err):
             with self.assertRaises(urllib.error.HTTPError):
-                mail.send_confirmation_email("abc123@cornell.edu", "",
-                                             CONFIRM_URL)
+                mail.send_welcome_email("abc123@cornell.edu", "",
+                                             UNSUB_URL)
         detail = mail.last_error()
         self.assertIn("401", detail)
         self.assertIn("Invalid API key", detail)
@@ -183,8 +183,8 @@ class MailResendTests(unittest.TestCase):
         os.environ["RESEND_API_KEY"] = "re_test_key_123"
         calls = self._capture_urlopen()
         with mock.patch.object(smtplib, "SMTP", _FakeSMTP):
-            mail.send_confirmation_email("abc123@cornell.edu", "Test Person",
-                                         CONFIRM_URL)
+            mail.send_welcome_email("abc123@cornell.edu", "Test Person",
+                                         UNSUB_URL)
         self.assertEqual(calls, [])
         self.assertEqual(mail.email_mode(), "smtp")
         self.assertTrue(mail.email_configured())
@@ -194,7 +194,7 @@ class MailResendTests(unittest.TestCase):
         self.assertEqual(sent[0]["From"],
                          "Center for Belonging <sender@example.test>")
         body = sent[0].get_content()
-        self.assertIn(CONFIRM_URL, body)
+        self.assertIn(UNSUB_URL, body)
         self.assertEqual(mail.last_error(), "")
 
 

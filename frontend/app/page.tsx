@@ -137,6 +137,7 @@ type SignupMode = "form" | "inbox" | "done" | "fail";
 export default function Home() {
   /* ------------------------------ signup ------------------------------ */
   const [mode, setMode] = useState<SignupMode>("form");
+  const [welcomeSent, setWelcomeSent] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [err, setErr] = useState("");
@@ -231,28 +232,14 @@ export default function Home() {
       });
       if (res.already_subscribed) {
         setMode("done");
-      } else if (res.email_sent) {
-        // The confirmation email is the channel — never show the link
-        // on the page (Jemimah's settled rule).
-        setMode("inbox");
       } else {
-        // No confirmation email went out. Preserve the existing
-        // /newsletter fallback: hand the token over via sessionStorage
-        // so that page can confirm, and show the mockup's fail state.
-        if (res.confirmation_token) {
-          try {
-            window.sessionStorage.setItem(
-              "bowers-pending-confirmation",
-              JSON.stringify({
-                already: res.already_subscribed,
-                email_sent: res.email_sent,
-                email_configured: res.email_configured,
-                token: res.confirmation_token,
-                url: res.confirmation_url,
-                email: em,
-              })
-            );
-          } catch {
+        // Single opt-in: the signup subscribed them. The welcome
+        // note may or may not have sent — either way they are on
+        // the list, so this is the subscribed state, not a failure.
+        setWelcomeSent(!!res.email_sent);
+        setMode("inbox");
+      }
+    } catch {
             /* storage unavailable — /newsletter signup issues a fresh token */
           }
         }
@@ -400,23 +387,30 @@ export default function Home() {
                   {sending ? "Subscribing…" : "Subscribe"}
                 </button>
                 <p className="od-door-fine">
-                  We email a confirmation link first. Every issue has
-                  one-click unsubscribe.
+                  Subscribing adds you to the list right away. Every issue
+                  has one-click unsubscribe.
                 </p>
               </form>
             )}
 
             {mode === "inbox" && (
               <div aria-live="polite">
-                <h2>Check your inbox</h2>
+                <h2>You&rsquo;re subscribed</h2>
                 <p className="od-door-body">
-                  We sent a confirmation link to{" "}
-                  <strong>{email.trim() || "netid@cornell.edu"}</strong>.
-                  Open it and you are on the list.
-                </p>
-                <p className="od-door-sub">
-                  Nothing arrived after a few minutes? Check spam, or start
-                  again with the same address.
+                  {welcomeSent ? (
+                    <>
+                      A welcome email is on its way to{" "}
+                      <strong>{email.trim() || "netid@cornell.edu"}</strong>{" "}
+                      — no need to click anything, you are already on the
+                      list.
+                    </>
+                  ) : (
+                    <>
+                      You are on the list. The next issue lands in your
+                      inbox at{" "}
+                      <strong>{email.trim() || "netid@cornell.edu"}</strong>.
+                    </>
+                  )}
                 </p>
                 <button
                   type="button"
@@ -432,8 +426,8 @@ export default function Home() {
               <div aria-live="polite">
                 <h2>You are on the list</h2>
                 <p className="od-door-body">
-                  Your address is confirmed. The next issue lands in your
-                  inbox, and the latest one is just below.
+                  That address was already subscribed. The next issue lands
+                  in your inbox, and the latest one is just below.
                 </p>
                 <a className="od-door-link" href="#issue">
                   Read the latest issue
@@ -443,10 +437,10 @@ export default function Home() {
 
             {mode === "fail" && (
               <div aria-live="polite">
-                <h2>We could not send it</h2>
+                <h2>We could not sign you up</h2>
                 <p className="od-door-body">
-                  The confirmation email did not go out, so you are not
-                  subscribed yet. Nothing was lost on your side.
+                  Something went wrong on our side, so your address was not
+                  added. Nothing was lost on your side.
                 </p>
                 <button
                   type="button"
@@ -459,7 +453,7 @@ export default function Home() {
                   Still stuck? Email deib-office@bowers.cornell.edu and we
                   will add you by hand.{" "}
                   <Link href="/newsletter" style={{ color: "#fff" }}>
-                    Or confirm on the newsletter page
+                    Or use the newsletter page
                   </Link>
                   .
                 </p>
@@ -484,7 +478,7 @@ export default function Home() {
             <h3>How it works</h3>
             <ol>
               <li>Subscribe with your Cornell email.</li>
-              <li>Open the confirmation link we send you.</li>
+              <li>You&rsquo;re on the list — a welcome email lands in your inbox.</li>
               <li>
                 Each issue arrives with deadlines and links, so you can
                 apply the same day.

@@ -66,14 +66,11 @@ export interface CenterEvent {
 export interface NewsletterSignupResponse {
   ok: boolean;
   already_subscribed?: boolean;
-  // The confirmation email is the channel: when email is configured and
-  // the email went out, no token/url is returned — the page shows a
-  // "check your inbox" note instead. When it did not go out, the token
-  // and url come back for the /newsletter-only fallback link.
+  // Single opt-in: signup subscribes immediately. email_sent says
+  // whether the welcome note went out — the subscription stands
+  // either way.
   email_sent?: boolean;
   email_configured?: boolean;
-  confirmation_token?: string;
-  confirmation_url?: string;
 }
 
 export interface Slot {
@@ -264,10 +261,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  newsletterConfirm: (token: string) =>
-    request<{ ok: boolean; email: string }>(
-      `/api/newsletter/confirm?token=${encodeURIComponent(token)}`
-    ),
   newsletterUnsubscribe: (email: string) =>
     request<{ ok: boolean }>(`/api/newsletter/unsubscribe`, {
       method: "POST",

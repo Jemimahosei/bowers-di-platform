@@ -21,7 +21,7 @@ link — no email is ever claimed sent.
 
 ``email_mode()`` reports which sender is active ('smtp' | 'resend' |
 'console') and ``last_error()`` the last send failure, for
-``GET /api/health``. ``send_email`` / ``send_confirmation_email``
+``GET /api/health``. ``send_email`` / ``send_welcome_email``
 raise on failure — the caller records it (per-recipient status on
 campaigns, fallback link on signup).
 """
@@ -235,37 +235,35 @@ def send_email(to_email: str, subject: str, body: str,
                cfg["from_addr"], html=html_body)
 
 
-def send_confirmation_email(to_email: str, name: str,
-                            confirmation_url: str) -> None:
-    """Send the double-opt-in confirmation email for a newsletter signup.
+def send_welcome_email(to_email: str, name: str,
+                       unsubscribe_url: str) -> None:
+    """Send the welcome note for a newsletter signup.
 
-    This is the confirmation channel: the link lives in this email, not
-    on a page. Raises on failure — the caller falls back to showing the
-    link on /newsletter only instead of pretending the email went out.
+    Single opt-in (Jemimah, 2026-11-22): signing up subscribes the
+    address immediately — there is no confirmation link or second
+    step. This email is simply the short note that says so. Raises on
+    failure; the subscription stands either way, so the caller just
+    reports that the note did not go out.
     """
     cfg = smtp_settings()
     greeting = f"Hi {name}," if name else "Hi there,"
-    # Plain ASCII on purpose: a UTF-8 body gets quoted-printable
-    # encoding, which folds long lines at 76 chars — and the
-    # confirmation URL is long enough to be split mid-token, which
-    # breaks the link for anyone who copies it. ASCII stays 7bit and
-    # the URL line goes out whole.
+    # Plain ASCII on purpose (see git history): it keeps the SMTP
+    # path on 7bit encoding so the unsubscribe URL is never folded.
     body = (
         f"{greeting}\n\n"
-        "You signed up for the Center for Belonging newsletter - "
-        "thanks for joining.\n\n"
-        "Please confirm your subscription by clicking this link:\n"
-        f"{confirmation_url}\n\n"
-        "Every issue brings you real resources from the Center, plus "
-        "opportunities - conference funding and deadlines, scholarships "
-        "and paid opportunities, events and programs. It keeps coming, "
-        "so you don't have to go looking for it.\n\n"
-        "If you didn't sign up, you can ignore this email - nothing "
-        "else will be sent.\n"
+        "You're subscribed - welcome to Open Door, the Center for "
+        "Belonging newsletter at Cornell Bowers CIS.\n\n"
+        "You are now officially on the list. Every issue brings you "
+        "real resources from the Center, plus opportunities - "
+        "conference funding and deadlines, scholarships and paid "
+        "opportunities, events and programs - straight to this inbox. "
+        "There is nothing else you need to do.\n\n"
+        "If you ever want to stop receiving it, unsubscribe here:\n"
+        f"{unsubscribe_url}\n"
     )
     _send_text(
         to_email,
-        "Confirm your subscription to the Center for Belonging newsletter",
+        "You're subscribed - welcome to Open Door",
         body, "Center for Belonging", cfg["from_addr"], cte="7bit")
 
 

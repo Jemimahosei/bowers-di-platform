@@ -40,7 +40,12 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+)
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -340,15 +345,12 @@ def create_event(
 # The newsletter is the CORE feature: it is how the Center's resources
 # reach students at the Cornell domain. Public signup accepts Cornell
 # addresses ONLY (@cornell.edu, validated here and on the frontend).
-# Double opt-in. The confirmation email is the channel: signup sends
-# it when email is configured (see mail.send_confirmation_email). When
-# no email sender is configured, the signup response carries the token for the
-# /newsletter-only fallback link instead (see DEPLOY_NOTES.md).
-
-
-def _confirmation_url(request: Request, token: str) -> str:
-    base = str(request.base_url).rstrip("/")
-    return f"{base}/api/newsletter/confirm?token={token}"
+# Single opt-in (Jemimah, 2026-11-22): signup subscribes the address
+# immediately and sends a short welcome note (mail.send_welcome_email).
+# There is NO confirmation link — the old double opt-in step produced
+# "Invalid confirmation token" errors and Jemimah cut it. The legacy
+# /api/newsletter/confirm endpoint below only serves links already
+# sitting in old inboxes, and lands them on the newsletter page.
 
 
 def _subscriber_out(row: models.NewsletterSubscriber) -> dict:
@@ -391,7 +393,6 @@ def newsletter_signup(
         return JSONResponse(
             status_code=200, content={"ok": True, "already_subscribed": True}
         )
-    token = secrets.token_urlsafe(32)
     status_code = 201
     if row is None:
         row = models.NewsletterSubscriber(
@@ -400,65 +401,62 @@ def newsletter_signup(
             interests=json.dumps(payload.interests),
             topics=json.dumps(payload.topics),
             source=payload.source,
-            status="pending",
-            confirmation_token=token,
+            status="confirmed",
+            confirmation_token=None,
+            confirmed_at=datetime.utcnow(),
         )
         db.add(row)
         db.commit()
         db.refresh(row)
     else:
-        # Pending (or previously unsubscribed): re-issue a fresh token.
+        # Pending or previously unsubscribed: subscribe them now.
         row.name = payload.name.strip() or row.name
         row.interests = json.dumps(payload.interests)
         row.topics = json.dumps(payload.topics)
         row.source = payload.source or row.source
-        row.status = "pending"
-        row.confirmation_token = token
+        row.status = "confirmed"
+        row.confirmation_token = None
+        row.confirmed_at = datetime.utcnow()
         db.commit()
         status_code = 200
-    confirmation_url = _confirmation_url(request, token)
-    # The confirmation email is the channel: send it when email is
-    # configured. When it is not configured (or sending fails), fall
-    # back to returning the link for /newsletter only — never pretend
-    # the email went out.
+    # The welcome note: a short email that says they are subscribed.
+    # The subscription stands whether or not the note sends.
+    base = (os.environ.get("FRONTEND_URL") or str(request.base_url)).rstrip("/")
     email_sent = False
     if mail.email_configured():
         try:
-            mail.send_confirmation_email(
-                email, payload.name.strip(), confirmation_url)
+            mail.send_welcome_email(
+                email, payload.name.strip(),
+                f"{base}/unsubscribe?email={email}")
             email_sent = True
         except Exception:
             email_sent = False
-    if email_sent:
-        return JSONResponse(
-            status_code=status_code,
-            content={"ok": True, "email_sent": True,
-                     "email_configured": True},
-        )
     return JSONResponse(
         status_code=status_code,
-        content={"ok": True, "email_sent": False,
-                 "email_configured": mail.email_configured(),
-                 "confirmation_token": token,
-                 "confirmation_url": confirmation_url},
+        content={"ok": True, "email_sent": email_sent,
+                 "email_configured": mail.email_configured()},
     )
 
 
 @app.get("/api/newsletter/confirm")
 def newsletter_confirm(token: str = Query(default=""), db: Session = Depends(get_db)):
-    if not token:
-        raise HTTPException(status_code=400, detail="Confirmation token required")
-    row = (
-        db.query(models.NewsletterSubscriber)
-        .filter(models.NewsletterSubscriber.confirmation_token == token)
-        .first()
-    )
-    if row is None:
-        raise HTTPException(status_code=400, detail="Invalid confirmation token")
-    row.status = "confirmed"
-    row.confirmation_token = None
-    db.commit()
-    return {"ok": True, "email": row.email}
+    """Legacy double opt-in links from emails sent before 2026-11-22.
+
+    Signup no longer issues these. An old link confirms a still-pending
+    row when the token matches, and either way lands on the newsletter
+    page — never a raw JSON error (the failure Jemimah hit)."""
+    if token:
+        row = (
+            db.query(models.NewsletterSubscriber)
+            .filter(models.NewsletterSubscriber.confirmation_token == token)
+            .first()
+        )
+        if row is not None:
+            row.status = "confirmed"
+            row.confirmation_token = None
+            row.confirmed_at = datetime.utcnow()
+            db.commit()
+    return RedirectResponse(url="/newsletter", status_code=302)
 
 
 @app.post("/api/newsletter/unsubscribe")
