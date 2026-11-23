@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: bowers-di-platform
+    name: opendoor
     env: docker
     dockerfilePath: backend/Dockerfile
     dockerContext: .
