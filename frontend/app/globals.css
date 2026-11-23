@@ -718,6 +718,16 @@ textarea {
   color: var(--secondary);
 }
 
+.od-issue-apply {
+  display: inline-block;
+  margin-top: 6px;
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .od-issue-row .when {
   flex: 1 1 140px;
   min-width: 0;

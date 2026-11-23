@@ -29,7 +29,15 @@ interface IssueRow {
   title: string;
   note: string;
   when: string;
+  /** Where a visitor goes to register/apply — every live row carries
+   * one (Jemimah, 2026-11-22: the homepage listings must link out to
+   * the real pages so people can act the same day). */
+  link: string;
 }
+
+const BELONGING_LINK = "https://bowers.cornell.edu/belonging-bowers";
+const HUB_LINK =
+  "https://bowers.cornell.edu/belonging-bowers/resources-and-support";
 
 /* The mockup's example rows, shown when the API has nothing live yet
  * (the mockup itself labels its rows as examples for staff to fill). */
@@ -39,24 +47,28 @@ const EXAMPLE_ROWS: IssueRow[] = [
     title: "Tapia Conference travel support",
     note: "Funding covers registration and travel. Short form, no essay.",
     when: "Apply by Jan 20",
+    link: BELONGING_LINK,
   },
   {
     kind: "Conference funding",
     title: "Grace Hopper Celebration",
     note: "Request support, and join the Center's group for the trip.",
     when: "Apply by Feb 3",
+    link: BELONGING_LINK,
   },
   {
     kind: "Program",
     title: "CSMore",
     note: "Computer science support for students from other majors.",
     when: "Opens Feb 10",
+    link: BELONGING_LINK,
   },
   {
     kind: "Event",
     title: "Dinner with the Deans+",
     note: "Small tables, real conversation, free food.",
     when: "Feb 18, 6 PM",
+    link: BELONGING_LINK,
   },
 ];
 
@@ -108,6 +120,7 @@ export default function Home() {
                 title: c.name,
                 note: c.description ?? "",
                 when: formatDateRange(c.date, c.end_date),
+                link: c.link || BELONGING_LINK,
               })
             );
         }
@@ -120,6 +133,7 @@ export default function Home() {
               title: e.name,
               note: e.description ?? "",
               when: e.date ?? "",
+              link: BELONGING_LINK,
             })
           );
         }
@@ -130,6 +144,7 @@ export default function Home() {
               title: r.title,
               note: r.description,
               when: "",
+              link: r.link || HUB_LINK,
             })
           );
         }
@@ -446,6 +461,16 @@ export default function Home() {
                     <div className="kind">{o.kind}</div>
                     <div className="title">{o.title}</div>
                     {o.note && <div className="note">{o.note}</div>}
+                    {o.link && (
+                      <a
+                        className="od-issue-apply"
+                        href={o.link}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Apply or register →
+                      </a>
+                    )}
                   </div>
                   {o.when && (
                     <div className="when">
